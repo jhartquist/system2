@@ -1,0 +1,13 @@
+[package]
+name = "system2"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "System 2 decisions from System 1 judgments."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jhartquist/system2"
+keywords = ["jev", "typesafe", "llm", "decision"]
+categories = ["api-bindings", "asynchronous"]
+
+[lints]
+workspace = true
