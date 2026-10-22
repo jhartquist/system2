@@ -84,3 +84,75 @@ impl NoulAnswer {
         todo!()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{InvalidNoul, Noul};
+    use crate::InvalidJson;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn new_refuses_empty_instructions() {
+        let error = Noul::new("").unwrap_err();
+
+        assert!(matches!(
+            error,
+            InvalidNoul::Instructions(InvalidJson::Empty)
+        ));
+        assert_eq!(error.to_string(), "the instructions must not be empty");
+    }
+
+    #[test]
+    fn with_criteria_refuses_empty_instructions() {
+        let error = Noul::with_criteria("", json!({ "true": "It sells." })).unwrap_err();
+
+        assert!(matches!(
+            error,
+            InvalidNoul::Instructions(InvalidJson::Empty)
+        ));
+    }
+
+    #[test]
+    fn with_criteria_refuses_criteria_of_another_shape() {
+        let cases = [
+            json!("It sells a product."),
+            json!({}),
+            json!({ "ture": "It sells a product." }),
+            json!({ "true": "It sells a product.", "maybe": "It links out." }),
+        ];
+        for criteria in cases {
+            let error = Noul::with_criteria("Is it spam?", &criteria).unwrap_err();
+            assert!(matches!(error, InvalidNoul::Criteria), "{criteria}");
+            assert_eq!(
+                error.to_string(),
+                "the criteria must be an object with the key `true`, the key `false`, or both"
+            );
+        }
+    }
+
+    #[test]
+    fn with_criteria_refuses_criteria_that_do_not_serialize() {
+        let pairs = BTreeMap::from([((1, 2), "a pair as a key")]);
+        let error = Noul::with_criteria("Is it spam?", pairs).unwrap_err();
+        assert!(matches!(error, InvalidNoul::Criteria));
+
+        let too_large = BTreeMap::from([("true", u128::MAX)]);
+        let error = Noul::with_criteria("Is it spam?", too_large).unwrap_err();
+        assert!(matches!(error, InvalidNoul::Criteria));
+    }
+
+    #[test]
+    fn with_criteria_names_the_criterion_in_its_error() {
+        let error = Noul::with_criteria("Is it spam?", json!({ "true": "" })).unwrap_err();
+        assert!(matches!(error, InvalidNoul::True(InvalidJson::Empty)));
+        assert_eq!(error.to_string(), "the `true` criterion must not be empty");
+
+        let error = Noul::with_criteria("Is it spam?", json!({ "false": 0 })).unwrap_err();
+        assert!(matches!(error, InvalidNoul::False(InvalidJson::Shape)));
+        assert_eq!(
+            error.to_string(),
+            "the `false` criterion must be text, an object, or an array"
+        );
+    }
+}
