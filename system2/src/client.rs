@@ -1,6 +1,6 @@
 use crate::{AskError, Noul, NoulAnswer, json};
 use reqwest::Url;
-use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE};
+use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fmt;
@@ -9,6 +9,7 @@ use std::time::Duration;
 const BASE_URL: &str = "https://api.typesafe.ai";
 const MODEL: &str = "jev-latest";
 const TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_ID: &str = "x-typesafe-request-id";
 
 #[derive(Clone)]
 pub struct Client {
@@ -76,15 +77,12 @@ impl Client {
             .await
             .map_err(AskError::from_reqwest)?;
         let status = response.status();
+        let request_id = request_id(response.headers());
         let text = response.text().await.map_err(AskError::from_reqwest)?;
         if !status.is_success() {
-            let status = status.as_u16();
-            return Err(AskError::Http {
-                status,
-                message: text,
-            });
+            return Err(AskError::from_status(status, &text, request_id));
         }
-        parse_answer(&text)
+        parse_answer(&text, request_id)
     }
 
     fn body(&self, question: &Noul, state: &Value) -> Value {
@@ -125,10 +123,18 @@ enum Answer {
     Noul { noul: f64 },
 }
 
-fn parse_answer(text: &str) -> Result<NoulAnswer, AskError> {
+fn request_id(headers: &HeaderMap) -> Option<String> {
+    let _ = (headers, REQUEST_ID);
+    todo!()
+}
+
+fn parse_answer(text: &str, request_id: Option<String>) -> Result<NoulAnswer, AskError> {
     let response: Value = serde_json::from_str(text).map_err(|error| {
         let message = format!("must be JSON: {error}");
-        AskError::InvalidResponse { message }
+        AskError::InvalidResponse {
+            message,
+            request_id: request_id.clone(),
+        }
     })?;
     let Response {
         answers: Answers {
@@ -136,7 +142,10 @@ fn parse_answer(text: &str) -> Result<NoulAnswer, AskError> {
         },
     } = serde_json::from_value(response).map_err(|error| {
         let message = format!("must answer each question: {error}");
-        AskError::InvalidResponse { message }
+        AskError::InvalidResponse {
+            message,
+            request_id,
+        }
     })?;
     Ok(NoulAnswer::new(noul))
 }
@@ -225,12 +234,12 @@ mod tests {
     fn parse_answer_takes_a_noul_answer() {
         let text = json!({ "answers": { "q0": { "type": "noul", "noul": 0.92 } } }).to_string();
 
-        assert_eq!(parse_answer(&text).unwrap().probability(), 0.92);
+        assert_eq!(parse_answer(&text, None).unwrap().probability(), 0.92);
     }
 
     #[test]
     fn parse_answer_refuses_text_that_is_not_json() {
-        let error = parse_answer("<html>").unwrap_err();
+        let error = parse_answer("<html>", None).unwrap_err();
 
         assert!(matches!(error, AskError::InvalidResponse { .. }));
         assert_eq!(
@@ -243,7 +252,7 @@ mod tests {
     fn parse_answer_refuses_the_wrong_answer() {
         let text = json!({ "answers": { "q0": { "type": "box", "confidence": 0.9 } } });
 
-        let error = parse_answer(&text.to_string()).unwrap_err();
+        let error = parse_answer(&text.to_string(), None).unwrap_err();
 
         assert!(matches!(error, AskError::InvalidResponse { .. }));
         assert_eq!(
