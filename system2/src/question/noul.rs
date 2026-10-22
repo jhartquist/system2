@@ -1,16 +1,16 @@
-use crate::InvalidJson;
+use crate::{InvalidJson, json};
 use serde::Serialize;
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "read when the constructors have bodies")]
+#[expect(dead_code, reason = "the request reads them")]
 pub struct Noul {
     instructions: Value,
     criteria: Criteria,
 }
 
-#[derive(Debug, Clone)]
-#[expect(dead_code, reason = "read when the constructors have bodies")]
+#[derive(Debug, Clone, Default)]
+#[expect(dead_code, reason = "the request reads them")]
 struct Criteria {
     r#true: Option<Value>,
     r#false: Option<Value>,
@@ -18,16 +18,39 @@ struct Criteria {
 
 impl Noul {
     pub fn new(instructions: impl Serialize) -> Result<Self, InvalidNoul> {
-        let _ = instructions;
-        todo!()
+        let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
+        let criteria = Criteria::default();
+        Ok(Noul {
+            instructions,
+            criteria,
+        })
     }
 
     pub fn with_criteria(
         instructions: impl Serialize,
         criteria: impl Serialize,
     ) -> Result<Self, InvalidNoul> {
-        let _ = (instructions, criteria);
-        todo!()
+        let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
+        let criteria = Criteria::from_data(criteria)?;
+        Ok(Noul {
+            instructions,
+            criteria,
+        })
+    }
+}
+
+impl Criteria {
+    fn from_data(criteria: impl Serialize) -> Result<Self, InvalidNoul> {
+        let Ok(Value::Object(mut fields)) = serde_json::to_value(criteria) else {
+            return Err(InvalidNoul::Criteria);
+        };
+        if fields.is_empty() || fields.keys().any(|key| key != "true" && key != "false") {
+            return Err(InvalidNoul::Criteria);
+        }
+        let mut take = |key| fields.remove(key).map(json::validate).transpose();
+        let r#true = take("true").map_err(InvalidNoul::True)?;
+        let r#false = take("false").map_err(InvalidNoul::False)?;
+        Ok(Criteria { r#true, r#false })
     }
 }
 

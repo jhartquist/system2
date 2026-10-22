@@ -4,6 +4,7 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 mod error;
+mod json;
 mod question;
 
 pub use error::InvalidJson;
