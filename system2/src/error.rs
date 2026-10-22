@@ -27,3 +27,13 @@ pub enum AskError {
     #[error("the response {message}")]
     InvalidResponse { message: String },
 }
+
+impl AskError {
+    pub(crate) fn from_reqwest(error: reqwest::Error) -> Self {
+        if error.is_timeout() {
+            AskError::Timeout
+        } else {
+            AskError::Transport(Box::new(error))
+        }
+    }
+}

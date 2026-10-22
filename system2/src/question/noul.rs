@@ -1,25 +1,25 @@
 use crate::{InvalidJson, json};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "the request reads them")]
 pub struct Noul {
     instructions: Value,
-    criteria: Criteria,
+    criteria: Option<Criteria>,
 }
 
-#[derive(Debug, Clone, Default)]
-#[expect(dead_code, reason = "the request reads them")]
+#[derive(Debug, Clone, Serialize)]
 struct Criteria {
+    #[serde(skip_serializing_if = "Option::is_none")]
     r#true: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     r#false: Option<Value>,
 }
 
 impl Noul {
     pub fn new(instructions: impl Serialize) -> Result<Self, InvalidNoul> {
         let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
-        let criteria = Criteria::default();
+        let criteria = None;
         Ok(Noul {
             instructions,
             criteria,
@@ -31,16 +31,28 @@ impl Noul {
         criteria: impl Serialize,
     ) -> Result<Self, InvalidNoul> {
         let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
-        let criteria = Criteria::from_data(criteria)?;
+        let criteria = Some(Criteria::new(criteria)?);
         Ok(Noul {
             instructions,
             criteria,
         })
     }
+
+    pub(crate) fn to_json(&self) -> Value {
+        let Noul {
+            instructions,
+            criteria,
+        } = self;
+        let mut question = json!({ "type": "noul", "instructions": instructions });
+        if let Some(criteria) = criteria {
+            question["criteria"] = json!(criteria);
+        }
+        question
+    }
 }
 
 impl Criteria {
-    fn from_data(criteria: impl Serialize) -> Result<Self, InvalidNoul> {
+    fn new(criteria: impl Serialize) -> Result<Self, InvalidNoul> {
         let Ok(Value::Object(mut fields)) = serde_json::to_value(criteria) else {
             return Err(InvalidNoul::Criteria);
         };
@@ -68,26 +80,29 @@ pub enum InvalidNoul {
 }
 
 #[derive(Debug, Clone)]
-#[expect(dead_code, reason = "read when the methods have bodies")]
 pub struct NoulAnswer {
     probability: f64,
 }
 
 impl NoulAnswer {
+    pub(crate) fn new(probability: f64) -> Self {
+        NoulAnswer { probability }
+    }
+
     #[must_use]
     pub fn probability(&self) -> f64 {
-        todo!()
+        self.probability
     }
 
     #[must_use]
     pub fn is_likely(&self) -> bool {
-        todo!()
+        self.probability >= 0.5
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{InvalidNoul, Noul};
+    use super::{InvalidNoul, Noul, NoulAnswer};
     use crate::InvalidJson;
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -154,5 +169,37 @@ mod tests {
             error.to_string(),
             "the `false` criterion must be text, an object, or an array"
         );
+    }
+
+    #[test]
+    fn to_json_has_the_type_and_the_instructions() {
+        let noul = Noul::new("Is it spam?").unwrap();
+
+        assert_eq!(
+            noul.to_json(),
+            json!({ "type": "noul", "instructions": "Is it spam?" })
+        );
+    }
+
+    #[test]
+    fn to_json_has_only_the_criteria_of_the_noul() {
+        let cases = [
+            json!({ "true": "It sells a product." }),
+            json!({ "false": { "covers": "questions and replies" } }),
+            json!({ "true": "It sells a product.", "false": "It is a reply." }),
+        ];
+        for criteria in cases {
+            let noul = Noul::with_criteria("Is it spam?", &criteria).unwrap();
+            assert_eq!(
+                noul.to_json(),
+                json!({ "type": "noul", "instructions": "Is it spam?", "criteria": criteria })
+            );
+        }
+    }
+
+    #[test]
+    fn is_likely_at_one_half_or_more() {
+        assert!(NoulAnswer::new(0.5).is_likely());
+        assert!(!NoulAnswer::new(0.49).is_likely());
     }
 }
