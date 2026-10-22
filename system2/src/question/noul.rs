@@ -1,4 +1,4 @@
-use crate::{InvalidJson, json};
+use crate::{Asking, Client, InvalidJson, json};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -36,6 +36,10 @@ impl Noul {
             instructions,
             criteria,
         })
+    }
+
+    pub fn ask<S: Serialize + ?Sized>(self, state: &S) -> Asking<Noul> {
+        Client::global().ask(self, state)
     }
 
     pub(crate) fn to_json(&self) -> Value {
@@ -116,6 +120,21 @@ mod tests {
             InvalidNoul::Instructions(InvalidJson::Empty)
         ));
         assert_eq!(error.to_string(), "the instructions must not be empty");
+    }
+
+    #[test]
+    fn new_refuses_a_number_or_a_bool() {
+        for instructions in [json!(42), json!(0.5), json!(true)] {
+            let error = Noul::new(&instructions).unwrap_err();
+            assert!(
+                matches!(error, InvalidNoul::Instructions(InvalidJson::Shape)),
+                "{instructions}"
+            );
+            assert_eq!(
+                error.to_string(),
+                "the instructions must be text, an object, or an array"
+            );
+        }
     }
 
     #[test]

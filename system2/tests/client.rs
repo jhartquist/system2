@@ -1,40 +1,23 @@
-use serde_json::{Value, json};
+mod support;
+
+use serde_json::json;
 use std::error::Error;
 use std::io::Read;
 use std::net::TcpListener;
 use std::time::Duration;
+use support::{
+    INSTRUCTIONS, STATE, client_for, mock_api, noul_response, only_request, request_body,
+};
 use system2::{AskError, Client, InvalidJson, Noul};
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::{MockServer, ResponseTemplate};
 
-const INSTRUCTIONS: &str = "Is this message spam?";
-const STATE: &str = "Buy now!";
 const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";
 
-async fn mock_api(response: ResponseTemplate) -> MockServer {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
-        .respond_with(response)
-        .mount(&server)
-        .await;
-    server
-}
-
-fn noul_response(probability: f64) -> ResponseTemplate {
-    ResponseTemplate::new(200).set_body_json(json!({
-        "model": "jev-1.13.0",
-        "answers": { "q0": { "type": "noul", "noul": probability } },
-        "usage": { "input_tokens": 280, "output_tokens": 1 },
-    }))
-}
-
-fn client_for(server: &MockServer) -> Client {
-    Client::new().api_key("key").base_url(server.uri())
-}
-
 async fn no_request_sent(server: &MockServer) -> bool {
-    server.received_requests().await.unwrap().is_empty()
+    server
+        .received_requests()
+        .await
+        .is_some_and(|requests| requests.is_empty())
 }
 
 #[tokio::test]
@@ -43,22 +26,22 @@ async fn ask_sends_a_noul_and_reads_its_answer() {
     let question =
         Noul::with_criteria(INSTRUCTIONS, json!({ "true": "It sells a product." })).unwrap();
 
-    let answer = client_for(&server).ask(question, STATE).await.unwrap();
+    let answer = client_for(&server)
+        .model("jev-1.14.0")
+        .ask(question, STATE)
+        .await
+        .unwrap();
 
-    assert!(answer.is_likely());
-    let requests = server.received_requests().await.unwrap();
-    let [request] = requests.as_slice() else {
-        panic!("{} requests", requests.len());
-    };
+    assert!(answer.probability() >= 0.9);
+    let request = only_request(&server).await;
     let header = |name| request.headers[name].to_str().unwrap();
     assert_eq!(header("authorization"), "Bearer key");
     assert_eq!(header("content-type"), "application/json");
     assert_eq!(header("content-encoding"), "zstd");
-    let body = zstd::decode_all(request.body.as_slice()).unwrap();
     assert_eq!(
-        serde_json::from_slice::<Value>(&body).unwrap(),
+        request_body(&request),
         json!({
-            "model": "jev-latest",
+            "model": "jev-1.14.0",
             "state": STATE,
             "questions": {
                 "q0": {
@@ -80,7 +63,7 @@ async fn ask_returns_a_future_that_can_be_spawned() {
     drop(state);
     let answer = tokio::spawn(asking).await.unwrap().unwrap();
 
-    assert!(answer.is_likely());
+    assert!(answer.probability() >= 0.9);
 }
 
 #[tokio::test]
@@ -89,6 +72,7 @@ async fn ask_cancels_the_request_when_dropped() {
     let client = Client::new()
         .api_key("key")
         .base_url(format!("http://{}", listener.local_addr().unwrap()));
+
     // a server that reads the request and never answers
     let received = tokio::task::spawn_blocking(move || {
         let (mut socket, _) = listener.accept().unwrap();

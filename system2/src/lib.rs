@@ -1,6 +1,6 @@
 //! System 2 decisions from System 1 judgments.
 
-// library never prints, examples can
+#![forbid(unsafe_code)]
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 mod ask;

@@ -3,13 +3,16 @@ use reqwest::Url;
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::fmt;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
+use std::{env, fmt};
 
 const BASE_URL: &str = "https://api.typesafe.ai";
 const MODEL: &str = "jev-latest";
 const TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_ID: &str = "x-typesafe-request-id";
+
+static GLOBAL: Mutex<Option<Client>> = Mutex::new(None);
 
 #[derive(Clone)]
 pub struct Client {
@@ -29,6 +32,19 @@ impl Client {
             base_url: BASE_URL.to_owned(),
             model: MODEL.to_owned(),
             timeout: TIMEOUT,
+        }
+    }
+
+    #[must_use]
+    pub fn from_env() -> Self {
+        let api_key = var("TYPESAFE_API_KEY");
+        let base_url = var("TYPESAFE_BASE_URL").unwrap_or_else(|| BASE_URL.to_owned());
+        let model = var("TYPESAFE_DEFAULT_MODEL").unwrap_or_else(|| MODEL.to_owned());
+        Client {
+            api_key,
+            base_url,
+            model,
+            ..Client::new()
         }
     }
 
@@ -53,6 +69,14 @@ impl Client {
     #[must_use]
     pub fn timeout(self, timeout: Duration) -> Self {
         Client { timeout, ..self }
+    }
+
+    pub fn set_global(self) {
+        *lock_global() = Some(self);
+    }
+
+    pub(crate) fn global() -> Client {
+        lock_global().get_or_insert_with(Client::from_env).clone()
     }
 
     pub fn ask<S: Serialize + ?Sized>(&self, question: Noul, state: &S) -> Asking<Noul> {
@@ -102,6 +126,7 @@ impl Client {
             .ok_or_else(|| AskError::InvalidBaseUrl {
                 url: self.base_url.clone(),
             })?;
+
         // a proxy can serve the api under a path of its own
         let path = format!("{}/v1/systemone", url.path().trim_end_matches('/'));
         url.set_path(&path);
@@ -123,6 +148,14 @@ struct Answers {
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Answer {
     Noul { noul: f64 },
+}
+
+fn var(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
+}
+
+fn lock_global() -> MutexGuard<'static, Option<Client>> {
+    GLOBAL.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 fn request_id(headers: &HeaderMap) -> Option<String> {
