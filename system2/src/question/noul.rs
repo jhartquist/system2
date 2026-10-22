@@ -66,3 +66,21 @@ pub enum InvalidNoul {
     #[error("the `false` criterion {0}")]
     False(InvalidJson),
 }
+
+#[derive(Debug, Clone)]
+#[expect(dead_code, reason = "read when the methods have bodies")]
+pub struct NoulAnswer {
+    probability: f64,
+}
+
+impl NoulAnswer {
+    #[must_use]
+    pub fn probability(&self) -> f64 {
+        todo!()
+    }
+
+    #[must_use]
+    pub fn is_likely(&self) -> bool {
+        todo!()
+    }
+}

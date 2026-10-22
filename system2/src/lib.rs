@@ -3,9 +3,11 @@
 // library never prints, examples can
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
+mod client;
 mod error;
 mod json;
 mod question;
 
-pub use error::InvalidJson;
-pub use question::{InvalidNoul, Noul};
+pub use client::Client;
+pub use error::{AskError, InvalidJson};
+pub use question::{InvalidNoul, Noul, NoulAnswer};

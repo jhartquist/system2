@@ -1,3 +1,3 @@
 mod noul;
 
-pub use noul::{InvalidNoul, Noul};
+pub use noul::{InvalidNoul, Noul, NoulAnswer};

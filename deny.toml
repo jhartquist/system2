@@ -2,7 +2,7 @@
 all-features = true
 
 [licenses]
-allow = ["MIT", "Apache-2.0"]
+allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "CDLA-Permissive-2.0", "ISC", "Unicode-3.0"]
 
 [sources]
 unknown-registry = "deny"
