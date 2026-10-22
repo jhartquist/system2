@@ -8,6 +8,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const INSTRUCTIONS: &str = "Is this message spam?";
 const STATE: &str = "Buy now!";
+const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";
 
 async fn mock_api(response: ResponseTemplate) -> MockServer {
     let server = MockServer::start().await;
@@ -147,16 +148,68 @@ async fn ask_reports_a_failed_connection() {
 
 #[tokio::test]
 async fn ask_reports_an_error_status() {
-    let server = mock_api(ResponseTemplate::new(401).set_body_string("Unauthorized")).await;
+    let body = json!({
+        "detail": { "error_type": "api_usage_error", "message": "Unknown model: jev-1.14" },
+    });
+    let response = ResponseTemplate::new(400)
+        .insert_header("x-typesafe-request-id", REQUEST_ID)
+        .set_body_json(body);
+    let server = mock_api(response).await;
 
     let error = client_for(&server)
         .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
         .await
         .unwrap_err();
 
-    assert!(matches!(error, AskError::Http { status: 401, .. }));
+    assert!(matches!(
+        &error,
+        AskError::Http { status: 400, request_id: Some(id), .. } if id == REQUEST_ID
+    ));
     assert_eq!(
         error.to_string(),
-        "the API refused the request with status 401: Unauthorized"
+        format!(
+            "the API refused the request with status 400: Unknown model: jev-1.14 (request ID `{REQUEST_ID}`)"
+        )
+    );
+}
+
+#[tokio::test]
+async fn ask_reports_the_token_limit() {
+    let body = json!({ "detail": { "error_type": "max_tokens_exceeded" } });
+    let server = mock_api(ResponseTemplate::new(400).set_body_json(body)).await;
+
+    let error = client_for(&server)
+        .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AskError::TokenLimit));
+    assert_eq!(
+        error.to_string(),
+        "the request has too many tokens: use `Client::long_context(true)`"
+    );
+}
+
+#[tokio::test]
+async fn ask_reports_an_invalid_response() {
+    let response = ResponseTemplate::new(200)
+        .insert_header("x-typesafe-request-id", REQUEST_ID)
+        .set_body_string("<html>");
+    let server = mock_api(response).await;
+
+    let error = client_for(&server)
+        .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        AskError::InvalidResponse { request_id: Some(id), .. } if id == REQUEST_ID
+    ));
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "the response must be JSON: expected value at line 1 column 1 (request ID `{REQUEST_ID}`)"
+        )
     );
 }

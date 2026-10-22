@@ -173,8 +173,9 @@ impl fmt::Debug for Client {
 
 #[cfg(test)]
 mod tests {
-    use super::{Client, parse_answer};
+    use super::{Client, REQUEST_ID, parse_answer, request_id};
     use crate::{AskError, Noul};
+    use reqwest::header::{HeaderMap, HeaderValue};
     use serde_json::json;
 
     #[test]
@@ -227,6 +228,28 @@ mod tests {
                 "questions": { "q0": { "type": "noul", "instructions": "Is it spam?" } },
             })
         );
+    }
+
+    #[test]
+    fn request_id_reads_the_header() {
+        let cases = [
+            (
+                Some(HeaderValue::from_static(
+                    "req_01a13d1fbca4728f8f7c1cdd312bd3a5",
+                )),
+                Some("req_01a13d1fbca4728f8f7c1cdd312bd3a5"),
+            ),
+            (None, None),
+            (Some(HeaderValue::from_bytes(b"req_\xff").unwrap()), None),
+        ];
+        for (value, expected) in cases {
+            let mut headers = HeaderMap::new();
+            if let Some(value) = value {
+                headers.insert(REQUEST_ID, value);
+            }
+
+            assert_eq!(request_id(&headers).as_deref(), expected);
+        }
     }
 
     #[test]
