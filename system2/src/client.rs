@@ -1,4 +1,4 @@
-use crate::{AskError, Noul, NoulAnswer, json};
+use crate::{AskError, Asking, Noul, NoulAnswer, json};
 use reqwest::Url;
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap};
 use serde::{Deserialize, Serialize};
@@ -55,15 +55,17 @@ impl Client {
         Client { timeout, ..self }
     }
 
-    pub async fn ask<S: Serialize + ?Sized>(
-        &self,
-        question: Noul,
-        state: &S,
-    ) -> Result<NoulAnswer, AskError> {
-        let state = json::validate(state).map_err(AskError::State)?;
+    pub fn ask<S: Serialize + ?Sized>(&self, question: Noul, state: &S) -> Asking<Noul> {
+        // serialize now, so the future does not borrow the state
+        let state = json::validate(state).map_err(AskError::State);
+        let client = self.clone();
+        Asking::new(async move { client.send(&question, state?).await })
+    }
+
+    async fn send(self, question: &Noul, state: Value) -> Result<NoulAnswer, AskError> {
         let url = self.endpoint()?;
         let api_key = self.api_key.as_deref().ok_or(AskError::MissingApiKey)?;
-        let body = self.body(&question, &state);
+        let body = self.body(question, &state);
 
         let response = self
             .http

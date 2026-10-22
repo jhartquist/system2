@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use std::error::Error;
+use std::io::Read;
 use std::net::TcpListener;
 use std::time::Duration;
 use system2::{AskError, Client, InvalidJson, Noul};
@@ -67,6 +68,48 @@ async fn ask_sends_a_noul_and_reads_its_answer() {
                 },
             },
         })
+    );
+}
+
+#[tokio::test]
+async fn ask_returns_a_future_that_can_be_spawned() {
+    let server = mock_api(noul_response(0.92)).await;
+    let state = String::from(STATE);
+
+    let asking = client_for(&server).ask(Noul::new(INSTRUCTIONS).unwrap(), &state);
+    drop(state);
+    let answer = tokio::spawn(asking).await.unwrap().unwrap();
+
+    assert!(answer.is_likely());
+}
+
+#[tokio::test]
+async fn ask_cancels_the_request_when_dropped() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = Client::new()
+        .api_key("key")
+        .base_url(format!("http://{}", listener.local_addr().unwrap()));
+    // a server that reads the request and never answers
+    let received = tokio::task::spawn_blocking(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        socket.read_exact(&mut [0]).unwrap();
+        socket
+    });
+
+    let asking = client.ask(Noul::new(INSTRUCTIONS).unwrap(), STATE);
+    let mut socket = tokio::select! {
+        _ = asking => panic!("the server never answers"),
+        socket = received => socket.unwrap(),
+    };
+
+    // the runtime stays free, so the client can close the connection
+    let closed = tokio::task::spawn_blocking(move || socket.read_to_end(&mut Vec::new()));
+    assert!(
+        closed.await.unwrap().is_ok(),
+        "the connection is still open"
     );
 }
 
