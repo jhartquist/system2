@@ -124,8 +124,8 @@ enum Answer {
 }
 
 fn request_id(headers: &HeaderMap) -> Option<String> {
-    let _ = (headers, REQUEST_ID);
-    todo!()
+    let id = headers.get(REQUEST_ID)?.to_str().ok()?;
+    Some(id.to_owned())
 }
 
 fn parse_answer(text: &str, request_id: Option<String>) -> Result<NoulAnswer, AskError> {

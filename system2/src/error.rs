@@ -1,4 +1,7 @@
 use reqwest::StatusCode;
+use serde_json::Value;
+
+const TOKEN_LIMIT: &str = "max_tokens_exceeded";
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -44,8 +47,20 @@ pub enum AskError {
 
 impl AskError {
     pub(crate) fn from_status(status: StatusCode, body: &str, request_id: Option<String>) -> Self {
-        let _ = (status, body, request_id);
-        todo!()
+        let detail = serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|mut body| body.get_mut("detail").map(Value::take))
+            .unwrap_or_default();
+        if detail["error_type"] == TOKEN_LIMIT {
+            return AskError::TokenLimit;
+        }
+        let reason = status.canonical_reason().filter(|_| body.trim().is_empty());
+        let message = api_message(&detail).unwrap_or_else(|| reason.unwrap_or(body).to_owned());
+        AskError::Http {
+            status: status.as_u16(),
+            message,
+            request_id,
+        }
     }
 
     pub(crate) fn from_reqwest(error: reqwest::Error) -> Self {
@@ -57,9 +72,23 @@ impl AskError {
     }
 }
 
+fn api_message(detail: &Value) -> Option<String> {
+    match detail {
+        Value::String(message) => Some(message.clone()),
+        Value::Array(entries) => {
+            let messages: Vec<&str> = entries
+                .iter()
+                .filter_map(|entry| entry["msg"].as_str())
+                .collect();
+            (!messages.is_empty()).then(|| messages.join("; "))
+        }
+        _ => detail["message"].as_str().map(str::to_owned),
+    }
+}
+
 fn format_request_id(id: Option<&str>) -> String {
-    let _ = id;
-    todo!()
+    id.map(|id| format!(" (request ID `{id}`)"))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -106,13 +135,13 @@ mod tests {
 
             let error = AskError::from_status(status, &body, None);
 
-            let AskError::Http {
-                status, message, ..
-            } = error
-            else {
-                panic!("{error:?} for {body}");
-            };
-            assert_eq!((status, message.as_str()), (code, expected), "{body}");
+            assert!(
+                matches!(
+                    &error,
+                    AskError::Http { status, message, .. } if *status == code && message == expected
+                ),
+                "{error:?}, expected {code}: {expected}"
+            );
         }
     }
 
