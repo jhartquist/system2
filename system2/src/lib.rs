@@ -2,3 +2,9 @@
 
 // library never prints, examples can
 #![deny(clippy::print_stdout, clippy::print_stderr)]
+
+mod error;
+mod question;
+
+pub use error::InvalidJson;
+pub use question::{InvalidNoul, Noul};
