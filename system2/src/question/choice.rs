@@ -211,15 +211,6 @@ pub struct ChoiceAnswer<T> {
     probabilities: Vec<f64>,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[non_exhaustive]
-pub struct ChoiceProbability<'a, T> {
-    pub name: &'a str,
-    pub description: Option<&'a RawValue>,
-    pub value: &'a T,
-    pub probability: f64,
-}
-
 impl<T> ChoiceAnswer<T> {
     #[must_use]
     pub fn question(&self) -> &Choice<T> {
@@ -246,8 +237,8 @@ impl<T> ChoiceAnswer<T> {
         let mut ranked: Vec<_> = self.probabilities().collect();
 
         // a stable sort keeps equal options in the order of the question
-        ranked.sort_by(|a, b| b.probability.total_cmp(&a.probability));
-        ranked.into_iter().take(n).map(|o| (o.value, o.probability))
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+        ranked.into_iter().take(n)
     }
 
     #[must_use]
@@ -256,17 +247,12 @@ impl<T> ChoiceAnswer<T> {
     }
 
     #[must_use]
-    pub fn probabilities(&self) -> impl ExactSizeIterator<Item = ChoiceProbability<'_, T>> {
+    pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&T, f64)> {
         self.question
             .options
             .iter()
             .zip(&self.probabilities)
-            .map(|(option, &probability)| ChoiceProbability {
-                name: &option.name,
-                description: option.description.as_deref(),
-                value: &option.value,
-                probability,
-            })
+            .map(|(option, &probability)| (&option.value, probability))
     }
 
     #[must_use]
@@ -347,7 +333,6 @@ mod tests {
     use super::{Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, Options};
     use crate::InvalidJson;
     use crate::ask::private::Sealed;
-    use serde_json::value::RawValue;
     use serde_json::{Map, Value, json};
     use std::collections::BTreeMap;
 
@@ -610,18 +595,12 @@ mod tests {
 
         assert_eq!(*answer.most_likely(), "go");
         assert_eq!(answer.confidence(), 0.6);
-        let probabilities: Vec<_> = answer
-            .probabilities()
-            .map(|option| (option.name, *option.value, option.probability))
-            .collect();
+        let probabilities: Vec<_> = answer.probabilities().collect();
         assert_eq!(
             probabilities,
-            [
-                ("rust", "rust", 0.2),
-                ("python", "python", 0.4),
-                ("go", "go", 0.4)
-            ]
+            [(&"rust", 0.2), (&"python", 0.4), (&"go", 0.4)]
         );
+        assert_eq!(answer.probabilities().len(), 3);
     }
 
     #[test]
@@ -652,25 +631,6 @@ mod tests {
             let choice = Choice::new("Which language?", ["rust", "go"]).unwrap();
             assert_eq!(choice.into_answer(json).unwrap_err(), message);
         }
-    }
-
-    #[test]
-    fn probabilities_has_the_descriptions() {
-        let choice = Choice::with_descriptions(
-            "What next?",
-            [("block", Some("Ask for a fix.")), ("approve", None)],
-        )
-        .unwrap();
-        let answer = choice
-            .into_answer(answer("block", &json!({ "block": 0.9, "approve": 0.1 })))
-            .unwrap();
-
-        let descriptions: Vec<_> = answer
-            .probabilities()
-            .map(|option| option.description.map(RawValue::get))
-            .collect();
-        assert_eq!(descriptions, [Some(r#""Ask for a fix.""#), None]);
-        assert_eq!(answer.probabilities().len(), 2);
     }
 
     #[test]

@@ -124,13 +124,6 @@ pub struct ScoreAnswer<L> {
     most_likely: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
-#[non_exhaustive]
-pub struct ScoreProbability<'a, L> {
-    pub value: &'a L,
-    pub probability: f64,
-}
-
 impl<L> ScoreAnswer<L> {
     #[must_use]
     pub fn question(&self) -> &Score<L> {
@@ -164,15 +157,12 @@ impl<L> ScoreAnswer<L> {
     }
 
     #[must_use]
-    pub fn probabilities(&self) -> impl ExactSizeIterator<Item = ScoreProbability<'_, L>> {
+    pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&L, f64)> {
         self.question
             .levels
             .iter()
             .zip(&self.probabilities)
-            .map(|(level, &probability)| ScoreProbability {
-                value: &level.value,
-                probability,
-            })
+            .map(|(level, &probability)| (&level.value, probability))
     }
 
     #[must_use]
@@ -437,13 +427,14 @@ mod tests {
 
         assert_eq!(answer.score(), 1.3);
         assert_eq!(answer.confidence(), 0.4);
-        let probabilities: Vec<_> = answer
-            .probabilities()
-            .map(|level| (*level.value, level.probability))
-            .collect();
+        let probabilities: Vec<_> = answer.probabilities().collect();
         assert_eq!(
             probabilities,
-            [("A line.", 0.1), ("A function.", 0.5), ("A module.", 0.4)]
+            [
+                (&"A line.", 0.1),
+                (&"A function.", 0.5),
+                (&"A module.", 0.4)
+            ]
         );
         assert_eq!(answer.probabilities().len(), 3);
     }
