@@ -3,7 +3,7 @@ mod support;
 use serde_json::json;
 use std::rc::Rc;
 use support::{STATE, client_for, mock_api, only_request, request_text, response};
-use system2::{AskError, Choice};
+use system2::{AskError, Choice, ChoiceOption, Options};
 use wiremock::ResponseTemplate;
 
 const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";
@@ -11,6 +11,27 @@ const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";
 #[derive(Debug)]
 struct File {
     path: String,
+}
+
+#[derive(Debug, PartialEq)]
+enum Problem {
+    Crash,
+    None,
+}
+
+impl Options for Problem {
+    const OPTIONS: &'static [ChoiceOption<Self>] = &[
+        ChoiceOption {
+            name: "crash",
+            description: Some("The code panics for some input."),
+            value: || Problem::Crash,
+        },
+        ChoiceOption {
+            name: "no_problem",
+            description: None,
+            value: || Problem::None,
+        },
+    ];
 }
 
 fn files() -> Vec<File> {
@@ -74,6 +95,26 @@ async fn ask_gives_back_values_that_are_not_clone() {
     let owned = Choice::with_values("Which file?", files, |f| f.path.clone()).unwrap();
     let file: File = client.ask(owned, STATE).await.unwrap().into_most_likely();
     assert_eq!(file.path, "src/client.rs");
+}
+
+#[tokio::test]
+async fn ask_gives_back_a_value_of_the_type() {
+    let server = mock_api(response(&json!({
+        "type": "choice",
+        "choice": "no_problem",
+        "confidence": 0.9,
+        "probabilities": { "crash": 0.05, "no_problem": 0.95 },
+    })))
+    .await;
+    let question = Choice::<Problem>::of("What is the worst problem?").unwrap();
+
+    let problem = client_for(&server)
+        .ask(question, STATE)
+        .await
+        .unwrap()
+        .into_most_likely();
+
+    assert_eq!(problem, Problem::None);
 }
 
 #[tokio::test]

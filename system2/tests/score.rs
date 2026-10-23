@@ -2,11 +2,30 @@ mod support;
 
 use serde_json::json;
 use support::{STATE, client_for, mock_api, only_request, request_text, response};
-use system2::Score;
+use system2::{Levels, Score, ScoreLevel};
 
 #[derive(Debug)]
 struct Risk {
     text: String,
+}
+
+#[derive(Debug, PartialEq)]
+enum Severity {
+    Minor,
+    Critical,
+}
+
+impl Levels for Severity {
+    const LEVELS: &'static [ScoreLevel<Self>] = &[
+        ScoreLevel {
+            level: "Nothing breaks.",
+            value: || Severity::Minor,
+        },
+        ScoreLevel {
+            level: "Data is lost.",
+            value: || Severity::Critical,
+        },
+    ];
 }
 
 #[tokio::test]
@@ -62,4 +81,24 @@ async fn ask_gives_back_values_that_are_not_clone() {
         .into_most_likely();
 
     assert_eq!(risk.text, "The change can lose data.");
+}
+
+#[tokio::test]
+async fn ask_gives_back_a_value_of_the_type() {
+    let server = mock_api(response(&json!({
+        "type": "score",
+        "score": 0.7,
+        "confidence": 0.4,
+        "probabilities": { "0": 0.3, "1": 0.7 },
+    })))
+    .await;
+    let question = Score::<Severity>::of("How severe is the problem?").unwrap();
+
+    let severity = client_for(&server)
+        .ask(question, STATE)
+        .await
+        .unwrap()
+        .into_most_likely();
+
+    assert_eq!(severity, Severity::Critical);
 }

@@ -21,6 +21,20 @@ struct Entry<T> {
     value: T,
 }
 
+pub trait Options: Sized + 'static {
+    // only the derive writes the table, so its shape can change
+    #[doc(hidden)]
+    const OPTIONS: &'static [ChoiceOption<Self>];
+}
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ChoiceOption<T> {
+    pub name: &'static str,
+    pub description: Option<&'static str>,
+    pub value: fn() -> T,
+}
+
 pub trait Label: label::Parts {}
 
 impl<L: label::Parts> Label for L {}
@@ -113,6 +127,21 @@ impl<T> Choice<T> {
             .map(|value| {
                 let label = label(&value);
                 Entry::new(label.name(), label.description(), value)
+            })
+            .collect::<Result<_, _>>()?;
+        Self::checked(instructions, options)
+    }
+
+    pub fn of(instructions: impl Serialize) -> Result<Self, InvalidChoice>
+    where
+        T: Options,
+    {
+        let instructions = json::validate(instructions).map_err(InvalidChoice::Instructions)?;
+        let options = T::OPTIONS
+            .iter()
+            .map(|option| {
+                let description = json::validate_optional(option.description);
+                Entry::new(option.name.to_owned(), description, (option.value)())
             })
             .collect::<Result<_, _>>()?;
         Self::checked(instructions, options)
@@ -315,7 +344,7 @@ fn criteria<T, S: Serializer>(options: &&[Entry<T>], serializer: S) -> Result<S:
 
 #[cfg(test)]
 mod tests {
-    use super::{Choice, ChoiceAnswer, InvalidChoice};
+    use super::{Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, Options};
     use crate::InvalidJson;
     use crate::ask::private::Sealed;
     use serde_json::value::RawValue;
@@ -338,6 +367,24 @@ mod tests {
     // one type of option, so coverage sees each check of `checked` and its success together
     fn numbered(count: usize) -> Vec<(String, Value)> {
         (0..count).map(|i| (format!("o{i}"), json!(null))).collect()
+    }
+
+    #[derive(Debug)]
+    struct Problem;
+
+    impl Options for Problem {
+        const OPTIONS: &'static [ChoiceOption<Self>] = &[
+            ChoiceOption {
+                name: "crash",
+                description: Some("The code panics for some input."),
+                value: || Problem,
+            },
+            ChoiceOption {
+                name: "no_problem",
+                description: None,
+                value: || Problem,
+            },
+        ];
     }
 
     fn languages() -> ChoiceAnswer<&'static str> {
@@ -436,6 +483,62 @@ mod tests {
     }
 
     #[test]
+    fn of_takes_the_options_of_the_type() {
+        let choice = Choice::<Problem>::of("What is the worst problem?").unwrap();
+
+        assert_eq!(
+            serialized(&choice),
+            concat!(
+                r#"{"type":"choice","instructions":"What is the worst problem?","#,
+                r#""criteria":{"crash":"The code panics for some input.","no_problem":null}}"#,
+            )
+        );
+    }
+
+    #[test]
+    fn of_refuses_a_bad_table() {
+        #[derive(Debug)]
+        struct Twice;
+        impl Options for Twice {
+            const OPTIONS: &'static [ChoiceOption<Self>] = &[
+                ChoiceOption {
+                    name: "crash",
+                    description: None,
+                    value: || Twice,
+                },
+                ChoiceOption {
+                    name: "crash",
+                    description: None,
+                    value: || Twice,
+                },
+            ];
+        }
+        #[derive(Debug)]
+        struct Blank;
+        impl Options for Blank {
+            const OPTIONS: &'static [ChoiceOption<Self>] = &[ChoiceOption {
+                name: "crash",
+                description: Some(" "),
+                value: || Blank,
+            }];
+        }
+
+        let cases = [
+            (
+                Choice::<Twice>::of("Which one?").unwrap_err(),
+                "each option must have a different name, but two options have the name `crash`",
+            ),
+            (
+                Choice::<Blank>::of("Which one?").unwrap_err(),
+                "the description of the option `crash` must not be empty",
+            ),
+        ];
+        for (error, message) in cases {
+            assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[test]
     fn with_descriptions_refuses_bad_options() {
         let options = |names: &[&str]| -> Vec<(String, Value)> {
             names
@@ -490,6 +593,7 @@ mod tests {
             Choice::new("", ["rust"]).unwrap_err(),
             Choice::with_descriptions(" ", [("rust", ())]).unwrap_err(),
             Choice::with_values(json!({}), ["rust"], |name| *name).unwrap_err(),
+            Choice::<Problem>::of(json!([])).unwrap_err(),
         ];
         for error in errors {
             assert!(matches!(

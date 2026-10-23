@@ -19,6 +19,19 @@ struct Entry<L> {
     value: L,
 }
 
+pub trait Levels: Sized + 'static {
+    // only the derive writes the table, so its shape can change
+    #[doc(hidden)]
+    const LEVELS: &'static [ScoreLevel<Self>];
+}
+
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ScoreLevel<L> {
+    pub level: &'static str,
+    pub value: fn() -> L,
+}
+
 impl<L> Score<L> {
     pub fn new(
         instructions: impl Serialize,
@@ -27,7 +40,10 @@ impl<L> Score<L> {
     where
         L: Serialize,
     {
-        Self::checked(instructions, levels, |level| json::validate(level))
+        let levels = levels
+            .into_iter()
+            .map(|level| (json::validate(&level), level));
+        Self::checked(instructions, levels)
     }
 
     pub fn with_values<D: Serialize>(
@@ -35,19 +51,31 @@ impl<L> Score<L> {
         values: impl IntoIterator<Item = L>,
         mut level: impl FnMut(&L) -> D,
     ) -> Result<Self, InvalidScore> {
-        Self::checked(instructions, values, |value| json::validate(level(value)))
+        let levels = values
+            .into_iter()
+            .map(|value| (json::validate(level(&value)), value));
+        Self::checked(instructions, levels)
+    }
+
+    pub fn of(instructions: impl Serialize) -> Result<Self, InvalidScore>
+    where
+        L: Levels,
+    {
+        let levels = L::LEVELS
+            .iter()
+            .map(|level| (json::validate(level.level), (level.value)()));
+        Self::checked(instructions, levels)
     }
 
     fn checked(
         instructions: impl Serialize,
-        values: impl IntoIterator<Item = L>,
-        mut level: impl FnMut(&L) -> Result<Box<RawValue>, InvalidJson>,
+        levels: impl IntoIterator<Item = (Result<Box<RawValue>, InvalidJson>, L)>,
     ) -> Result<Self, InvalidScore> {
         let instructions = json::validate(instructions).map_err(InvalidScore::Instructions)?;
-        let levels: Vec<_> = values
+        let levels: Vec<_> = levels
             .into_iter()
             .enumerate()
-            .map(|(index, value)| match level(&value) {
+            .map(|(index, (level, value))| match level {
                 Ok(level) => Ok(Entry { level, value }),
                 Err(error) => Err(InvalidScore::Level { index, error }),
             })
@@ -224,7 +252,7 @@ fn criteria<L, S: Serializer>(levels: &&[Entry<L>], serializer: S) -> Result<S::
 
 #[cfg(test)]
 mod tests {
-    use super::{InvalidScore, Score, ScoreAnswer};
+    use super::{InvalidScore, Levels, Score, ScoreAnswer, ScoreLevel};
     use crate::InvalidJson;
     use crate::ask::private::Sealed;
     use serde::Serialize;
@@ -247,6 +275,22 @@ mod tests {
     // one type of level, so coverage sees each check of `checked` and its success together
     fn numbered(count: usize) -> Vec<Value> {
         (0..count).map(|i| json!(format!("Level {i}."))).collect()
+    }
+
+    #[derive(Debug)]
+    struct Severity;
+
+    impl Levels for Severity {
+        const LEVELS: &'static [ScoreLevel<Self>] = &[
+            ScoreLevel {
+                level: "Nothing breaks.",
+                value: || Severity,
+            },
+            ScoreLevel {
+                level: "Data is lost.",
+                value: || Severity,
+            },
+        ];
     }
 
     fn sizes(probabilities: &Value) -> ScoreAnswer<&'static str> {
@@ -279,6 +323,56 @@ mod tests {
             serialized(&score),
             r#"{"type":"score","instructions":"How long?","criteria":[{"unit":"day","count":1},{"unit":"day","count":5}]}"#
         );
+    }
+
+    #[test]
+    fn of_sends_the_levels_of_the_type() {
+        let score = Score::<Severity>::of("How severe?").unwrap();
+
+        assert_eq!(
+            serialized(&score),
+            r#"{"type":"score","instructions":"How severe?","criteria":["Nothing breaks.","Data is lost."]}"#
+        );
+    }
+
+    #[test]
+    fn of_refuses_a_bad_table() {
+        #[derive(Debug)]
+        struct Twice;
+        impl Levels for Twice {
+            const LEVELS: &'static [ScoreLevel<Self>] = &[
+                ScoreLevel {
+                    level: "Some.",
+                    value: || Twice,
+                },
+                ScoreLevel {
+                    level: "Some.",
+                    value: || Twice,
+                },
+            ];
+        }
+        #[derive(Debug)]
+        struct Blank;
+        impl Levels for Blank {
+            const LEVELS: &'static [ScoreLevel<Self>] = &[ScoreLevel {
+                level: "",
+                value: || Blank,
+            }];
+        }
+
+        let cases = [
+            (
+                Score::<Twice>::of("How much?").unwrap_err(),
+                "each level must be different, but the levels at index 0 and 1 are the same",
+            ),
+            (
+                Score::<Blank>::of("How much?").unwrap_err(),
+                "the level at index 0 must not be empty",
+            ),
+        ];
+        for (error, message) in cases {
+            assert_eq!(error.to_string(), message);
+        }
     }
 
     #[test]
@@ -326,6 +420,7 @@ mod tests {
         let errors = [
             Score::new("", ["Some."]).unwrap_err(),
             Score::with_values(json!({}), [1], |_| "Some.").unwrap_err(),
+            Score::<Severity>::of(json!([])).unwrap_err(),
         ];
         for error in errors {
             assert!(matches!(

@@ -2,6 +2,8 @@ mod choice;
 mod noul;
 mod score;
 
-pub use choice::{Choice, ChoiceAnswer, ChoiceProbability, InvalidChoice, Label};
+pub use choice::{
+    Choice, ChoiceAnswer, ChoiceOption, ChoiceProbability, InvalidChoice, Label, Options,
+};
 pub use noul::{InvalidNoul, Noul, NoulAnswer};
-pub use score::{InvalidScore, Score, ScoreAnswer, ScoreProbability};
+pub use score::{InvalidScore, Levels, Score, ScoreAnswer, ScoreLevel, ScoreProbability};
