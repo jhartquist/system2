@@ -24,9 +24,13 @@ pub(crate) async fn mount(server: &MockServer, response: ResponseTemplate) {
 }
 
 pub(crate) fn noul_response(probability: f64) -> ResponseTemplate {
+    response(&json!({ "type": "noul", "noul": probability }))
+}
+
+pub(crate) fn response(answer: &Value) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(json!({
         "model": "jev-1.13.0",
-        "answers": { "q0": { "type": "noul", "noul": probability } },
+        "answers": { "q0": answer },
         "usage": { "input_tokens": 280, "output_tokens": 1 },
     }))
 }
@@ -42,6 +46,10 @@ pub(crate) async fn only_request(server: &MockServer) -> Request {
 }
 
 pub(crate) fn request_body(request: &Request) -> Value {
+    serde_json::from_str(&request_text(request)).unwrap()
+}
+
+pub(crate) fn request_text(request: &Request) -> String {
     let body = zstd::decode_all(request.body.as_slice()).unwrap();
-    serde_json::from_slice(&body).unwrap()
+    String::from_utf8(body).unwrap()
 }

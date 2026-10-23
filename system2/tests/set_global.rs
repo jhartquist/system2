@@ -4,6 +4,7 @@ mod support;
 
 use support::{INSTRUCTIONS, STATE, client_for, mock_api, noul_response};
 use system2::Noul;
+use system2::prelude::*;
 
 #[tokio::test]
 async fn set_global_replaces_the_client_of_a_later_ask() {

@@ -13,7 +13,13 @@ mod error;
 mod json;
 mod question;
 
-pub use ask::Asking;
+pub use ask::{Ask, Asking};
 pub use client::Client;
 pub use error::{AskError, InvalidJson};
-pub use question::{InvalidNoul, Noul, NoulAnswer};
+pub use question::{
+    Choice, ChoiceAnswer, ChoiceProbability, InvalidChoice, InvalidNoul, Label, Noul, NoulAnswer,
+};
+
+pub mod prelude {
+    pub use crate::Ask;
+}

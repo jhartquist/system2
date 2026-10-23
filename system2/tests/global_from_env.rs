@@ -6,6 +6,7 @@ use std::env;
 use std::net::TcpListener;
 use support::{INSTRUCTIONS, STATE, mount, noul_response, only_request, request_body};
 use system2::Noul;
+use system2::prelude::*;
 use wiremock::MockServer;
 
 #[tokio::test]

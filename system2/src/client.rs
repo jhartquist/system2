@@ -1,8 +1,9 @@
-use crate::{AskError, Asking, Noul, NoulAnswer, json};
+use crate::{Ask, AskError, Asking, json};
 use reqwest::Url;
 use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
+use serde_json::value::RawValue;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use std::{env, fmt};
@@ -79,17 +80,18 @@ impl Client {
         lock_global().get_or_insert_with(Client::from_env).clone()
     }
 
-    pub fn ask<S: Serialize + ?Sized>(&self, question: Noul, state: &S) -> Asking<Noul> {
+    pub fn ask<A: Ask, S: Serialize + ?Sized>(&self, question_set: A, state: &S) -> Asking<A> {
         // serialize now, so the future does not borrow the state
-        let state = json::validate(state).map_err(AskError::State);
+        let body = json::validate(state)
+            .map_err(AskError::State)
+            .map(|state| self.request_body(&question_set, &state));
         let client = self.clone();
-        Asking::new(async move { client.send(&question, state?).await })
+        Asking::new(question_set, async move { client.send(body?).await })
     }
 
-    async fn send(self, question: &Noul, state: Value) -> Result<NoulAnswer, AskError> {
+    async fn send(self, body: Vec<u8>) -> Result<RawAnswer, AskError> {
         let url = self.endpoint()?;
         let api_key = self.api_key.as_deref().ok_or(AskError::MissingApiKey)?;
-        let body = self.body(question, &state);
 
         let response = self
             .http
@@ -98,7 +100,7 @@ impl Client {
             .header(CONTENT_TYPE, "application/json")
             .header(CONTENT_ENCODING, "zstd")
             .timeout(self.timeout)
-            .body(compress(body.to_string().as_bytes()))
+            .body(compress(&body))
             .send()
             .await
             .map_err(AskError::from_reqwest)?;
@@ -108,15 +110,24 @@ impl Client {
         if !status.is_success() {
             return Err(AskError::from_status(status, &text, request_id));
         }
-        parse_answer(&text, request_id)
+        parse_response(&text, request_id)
     }
 
-    fn body(&self, question: &Noul, state: &Value) -> Value {
-        json!({
-            "model": self.model,
-            "state": state,
-            "questions": { "q0": question.to_json() },
+    #[expect(
+        clippy::expect_used,
+        reason = "each part is checked json or text, with text keys"
+    )]
+    fn request_body(&self, question_set: &impl Ask, state: &RawValue) -> Vec<u8> {
+        let model = &self.model;
+        let questions = Questions {
+            q0: question_set.to_json(),
+        };
+        serde_json::to_vec(&Body {
+            model,
+            state,
+            questions,
         })
+        .expect("the body serializes")
     }
 
     fn endpoint(&self) -> Result<Url, AskError> {
@@ -134,20 +145,27 @@ impl Client {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct RawAnswer {
+    pub(crate) json: Value,
+    pub(crate) request_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Body<'a, Q> {
+    model: &'a str,
+    state: &'a RawValue,
+    questions: Questions<Q>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Questions<Q> {
+    q0: Q,
+}
+
 #[derive(Deserialize)]
 struct Response {
-    answers: Answers,
-}
-
-#[derive(Deserialize)]
-struct Answers {
-    q0: Answer,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum Answer {
-    Noul { noul: f64 },
+    answers: Questions<Value>,
 }
 
 fn var(name: &str) -> Option<String> {
@@ -163,23 +181,17 @@ fn request_id(headers: &HeaderMap) -> Option<String> {
     Some(id.to_owned())
 }
 
-fn parse_answer(text: &str, request_id: Option<String>) -> Result<NoulAnswer, AskError> {
-    let response: Value = serde_json::from_str(text).map_err(|error| {
-        let message = format!("must be JSON: {error}");
-        AskError::InvalidResponse {
-            message,
-            request_id: request_id.clone(),
-        }
-    })?;
-    let response: Response = serde_json::from_value(response).map_err(|error| {
-        let message = format!("must answer each question: {error}");
-        AskError::InvalidResponse {
-            message,
-            request_id,
-        }
-    })?;
-    let Answer::Noul { noul } = response.answers.q0;
-    Ok(NoulAnswer::new(noul))
+fn parse_response(text: &str, request_id: Option<String>) -> Result<RawAnswer, AskError> {
+    let invalid = |message| AskError::InvalidResponse {
+        message,
+        request_id: request_id.clone(),
+    };
+    let response: Value =
+        serde_json::from_str(text).map_err(|error| invalid(format!("must be JSON: {error}")))?;
+    let response: Response = serde_json::from_value(response)
+        .map_err(|error| invalid(format!("must answer each question: {error}")))?;
+    let json = response.answers.q0;
+    Ok(RawAnswer { json, request_id })
 }
 
 #[expect(clippy::expect_used, reason = "zstd fails only when memory runs out")]
@@ -205,10 +217,11 @@ impl fmt::Debug for Client {
 
 #[cfg(test)]
 mod tests {
-    use super::{Client, REQUEST_ID, parse_answer, request_id};
+    use super::{Client, REQUEST_ID, parse_response, request_id};
     use crate::{AskError, Noul};
     use reqwest::header::{HeaderMap, HeaderValue};
     use serde_json::json;
+    use serde_json::value::RawValue;
     use std::time::Duration;
 
     #[test]
@@ -249,17 +262,17 @@ mod tests {
     }
 
     #[test]
-    fn body_has_the_model_the_state_and_the_question() {
+    fn request_body_has_the_model_the_state_and_the_question() {
         let client = Client::new().model("jev-1.14.0");
         let noul = Noul::new("Is it spam?").unwrap();
+        let state = RawValue::from_string(r#"{"text":"Buy now!","from":"a"}"#.to_owned()).unwrap();
 
         assert_eq!(
-            client.body(&noul, &json!("Buy now!")),
-            json!({
-                "model": "jev-1.14.0",
-                "state": "Buy now!",
-                "questions": { "q0": { "type": "noul", "instructions": "Is it spam?" } },
-            })
+            String::from_utf8(client.request_body(&noul, &state)).unwrap(),
+            concat!(
+                r#"{"model":"jev-1.14.0","state":{"text":"Buy now!","from":"a"},"#,
+                r#""questions":{"q0":{"type":"noul","instructions":"Is it spam?"}}}"#,
+            )
         );
     }
 
@@ -286,15 +299,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_answer_takes_a_noul_answer() {
-        let text = json!({ "answers": { "q0": { "type": "noul", "noul": 0.92 } } }).to_string();
+    fn parse_response_takes_the_answer_and_the_request_id() {
+        let answer = json!({ "type": "noul", "noul": 0.92 });
+        let text = json!({ "answers": { "q0": answer } }).to_string();
 
-        assert_eq!(parse_answer(&text, None).unwrap().probability(), 0.92);
+        let raw = parse_response(&text, Some("req_1".to_owned())).unwrap();
+
+        assert_eq!(raw.json, answer);
+        assert_eq!(raw.request_id.as_deref(), Some("req_1"));
     }
 
     #[test]
-    fn parse_answer_refuses_text_that_is_not_json() {
-        let error = parse_answer("<html>", None).unwrap_err();
+    fn parse_response_refuses_text_that_is_not_json() {
+        let error = parse_response("<html>", None).unwrap_err();
 
         assert!(matches!(error, AskError::InvalidResponse { .. }));
         assert_eq!(
@@ -304,15 +321,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_answer_refuses_the_wrong_answer() {
-        let text = json!({ "answers": { "q0": { "type": "box", "confidence": 0.9 } } });
+    fn parse_response_refuses_a_response_with_no_answer() {
+        let text = json!({ "answers": {} }).to_string();
 
-        let error = parse_answer(&text.to_string(), None).unwrap_err();
+        let error = parse_response(&text, Some("req_1".to_owned())).unwrap_err();
 
         assert!(matches!(error, AskError::InvalidResponse { .. }));
         assert_eq!(
             error.to_string(),
-            "the response must answer each question: unknown variant `box`, expected `noul`"
+            "the response must answer each question: missing field `q0` (request ID `req_1`)"
         );
     }
 

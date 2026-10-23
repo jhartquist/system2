@@ -1,19 +1,36 @@
-use crate::{Asking, Client, InvalidJson, json};
-use serde::Serialize;
-use serde_json::{Value, json};
+use crate::ask::{self, private::Sealed};
+use crate::{Ask, InvalidJson, json};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use serde_json::value::{RawValue, to_raw_value};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Noul {
-    instructions: Value,
+    instructions: Box<RawValue>,
     criteria: Option<Criteria>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct Criteria {
     #[serde(skip_serializing_if = "Option::is_none")]
-    r#true: Option<Value>,
+    r#true: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    r#false: Option<Value>,
+    r#false: Option<Box<RawValue>>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename = "noul")]
+struct Question<'a> {
+    instructions: &'a RawValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    criteria: Option<&'a Criteria>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum Answer {
+    Noul { noul: f64 },
 }
 
 impl Noul {
@@ -37,28 +54,41 @@ impl Noul {
             criteria,
         })
     }
+}
 
-    pub fn ask<S: Serialize + ?Sized>(self, state: &S) -> Asking<Noul> {
-        Client::global().ask(self, state)
+impl Ask for Noul {
+    type Answer = NoulAnswer;
+}
+
+impl Sealed for Noul {
+    fn to_json(&self) -> impl Serialize {
+        let instructions = &self.instructions;
+        let criteria = self.criteria.as_ref();
+        Question {
+            instructions,
+            criteria,
+        }
     }
 
-    pub(crate) fn to_json(&self) -> Value {
-        let mut question = json!({ "type": "noul", "instructions": self.instructions });
-        if let Some(criteria) = &self.criteria {
-            question["criteria"] = json!(criteria);
-        }
-        question
+    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
+        let Answer::Noul { noul: probability } = ask::from_json(json)?;
+        let question = self;
+        Ok(NoulAnswer {
+            question,
+            probability,
+        })
     }
 }
 
 impl Criteria {
     fn new(criteria: impl Serialize) -> Result<Self, InvalidNoul> {
-        let Ok(Value::Object(mut fields)) = serde_json::to_value(criteria) else {
-            return Err(InvalidNoul::Criteria);
-        };
-        if fields.is_empty() || fields.keys().any(|key| key != "true" && key != "false") {
-            return Err(InvalidNoul::Criteria);
-        }
+        let mut fields: HashMap<String, Box<RawValue>> = to_raw_value(&criteria)
+            .ok()
+            .and_then(|json| serde_json::from_str(json.get()).ok())
+            .filter(|fields: &HashMap<_, _>| {
+                !fields.is_empty() && fields.keys().all(|key| key == "true" || key == "false")
+            })
+            .ok_or(InvalidNoul::Criteria)?;
         let mut take = |key| fields.remove(key).map(json::validate).transpose();
         let r#true = take("true").map_err(InvalidNoul::True)?;
         let r#false = take("false").map_err(InvalidNoul::False)?;
@@ -81,12 +111,19 @@ pub enum InvalidNoul {
 
 #[derive(Debug, Clone)]
 pub struct NoulAnswer {
+    question: Noul,
     probability: f64,
 }
 
 impl NoulAnswer {
-    pub(crate) fn new(probability: f64) -> Self {
-        NoulAnswer { probability }
+    #[must_use]
+    pub fn question(&self) -> &Noul {
+        &self.question
+    }
+
+    #[must_use]
+    pub fn into_question(self) -> Noul {
+        self.question
     }
 
     #[must_use]
@@ -104,8 +141,13 @@ impl NoulAnswer {
 mod tests {
     use super::{InvalidNoul, Noul, NoulAnswer};
     use crate::InvalidJson;
-    use serde_json::json;
+    use crate::ask::private::Sealed;
+    use serde_json::{Value, json};
     use std::collections::BTreeMap;
+
+    fn serialized(noul: &Noul) -> Value {
+        serde_json::to_value(noul.to_json()).unwrap()
+    }
 
     #[test]
     fn new_refuses_empty_instructions() {
@@ -164,11 +206,9 @@ mod tests {
     #[test]
     fn with_criteria_refuses_criteria_that_do_not_serialize() {
         let pairs = BTreeMap::from([((1, 2), "a pair as a key")]);
-        let error = Noul::with_criteria("Is it spam?", pairs).unwrap_err();
-        assert!(matches!(error, InvalidNoul::Criteria));
 
-        let too_large = BTreeMap::from([("true", u128::MAX)]);
-        let error = Noul::with_criteria("Is it spam?", too_large).unwrap_err();
+        let error = Noul::with_criteria("Is it spam?", pairs).unwrap_err();
+
         assert!(matches!(error, InvalidNoul::Criteria));
     }
 
@@ -191,7 +231,7 @@ mod tests {
         let noul = Noul::new("Is it spam?").unwrap();
 
         assert_eq!(
-            noul.to_json(),
+            serialized(&noul),
             json!({ "type": "noul", "instructions": "Is it spam?" })
         );
     }
@@ -206,7 +246,7 @@ mod tests {
         for criteria in cases {
             let noul = Noul::with_criteria("Is it spam?", &criteria).unwrap();
             assert_eq!(
-                noul.to_json(),
+                serialized(&noul),
                 json!({ "type": "noul", "instructions": "Is it spam?", "criteria": criteria }),
                 "{criteria}"
             );
@@ -214,8 +254,43 @@ mod tests {
     }
 
     #[test]
+    fn into_answer_takes_the_probability_and_keeps_the_question() {
+        let noul = Noul::new("Is it spam?").unwrap();
+
+        let answer = noul
+            .into_answer(json!({ "type": "noul", "noul": 0.92 }))
+            .unwrap();
+
+        assert_eq!(answer.probability(), 0.92);
+        assert_eq!(answer.question().instructions.get(), r#""Is it spam?""#);
+        assert_eq!(
+            answer.into_question().instructions.get(),
+            r#""Is it spam?""#
+        );
+    }
+
+    #[test]
+    fn into_answer_refuses_another_type_of_answer() {
+        let noul = Noul::new("Is it spam?").unwrap();
+
+        let error = noul
+            .into_answer(json!({ "type": "box", "confidence": 0.9 }))
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            "must answer each question: unknown variant `box`, expected `noul`"
+        );
+    }
+
+    #[test]
     fn is_likely_at_one_half_or_more() {
-        assert!(NoulAnswer::new(0.5).is_likely());
-        assert!(!NoulAnswer::new(0.49).is_likely());
+        let answer = |probability| NoulAnswer {
+            question: Noul::new("Is it spam?").unwrap(),
+            probability,
+        };
+
+        assert!(answer(0.5).is_likely());
+        assert!(!answer(0.49).is_likely());
     }
 }
