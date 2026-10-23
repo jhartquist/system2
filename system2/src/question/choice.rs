@@ -21,24 +21,6 @@ struct Entry<T> {
     value: T,
 }
 
-#[derive(Serialize)]
-#[serde(tag = "type", rename = "choice")]
-struct Question<'a, T> {
-    instructions: &'a RawValue,
-    #[serde(serialize_with = "criteria")]
-    criteria: &'a [Entry<T>],
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum Answer {
-    Choice {
-        choice: String,
-        confidence: f64,
-        probabilities: HashMap<String, f64>,
-    },
-}
-
 pub trait Label: label::Parts {}
 
 impl<L: label::Parts> Label for L {}
@@ -177,50 +159,6 @@ impl<T> Ask for Choice<T> {
     type Answer = ChoiceAnswer<T>;
 }
 
-impl<T> Sealed for Choice<T> {
-    fn to_json(&self) -> impl Serialize {
-        let instructions = &self.instructions;
-        let criteria = self.options.as_slice();
-        Question {
-            instructions,
-            criteria,
-        }
-    }
-
-    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
-        let Answer::Choice {
-            choice,
-            confidence,
-            mut probabilities,
-        } = ask::from_json(json)?;
-        let choice = self
-            .options
-            .iter()
-            .position(|o| o.name == choice)
-            .ok_or_else(|| format!("must choose an option of the Choice, not `{choice}`"))?;
-        let count = probabilities.len();
-        let probabilities = self
-            .options
-            .iter()
-            .map(|o| probabilities.remove(&o.name))
-            .collect::<Option<Vec<_>>>()
-            .filter(|_| count == self.options.len())
-            .ok_or("must give a probability for each option of the Choice, and no other")?;
-        let question = self;
-        Ok(ChoiceAnswer {
-            question,
-            choice,
-            confidence,
-            probabilities,
-        })
-    }
-}
-
-// the options keep their order, which a json map sorts
-fn criteria<T, S: Serializer>(options: &&[Entry<T>], serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.collect_map(options.iter().map(|o| (&o.name, &o.description)))
-}
-
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidChoice {
@@ -311,6 +249,68 @@ impl<T> ChoiceAnswer<T> {
             .map(|(option, probability)| (option.value, probability))
             .collect()
     }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename = "choice")]
+struct Question<'a, T> {
+    instructions: &'a RawValue,
+    #[serde(serialize_with = "criteria")]
+    criteria: &'a [Entry<T>],
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum Answer {
+    Choice {
+        choice: String,
+        confidence: f64,
+        probabilities: HashMap<String, f64>,
+    },
+}
+
+impl<T> Sealed for Choice<T> {
+    fn to_json(&self) -> impl Serialize {
+        let instructions = &self.instructions;
+        let criteria = self.options.as_slice();
+        Question {
+            instructions,
+            criteria,
+        }
+    }
+
+    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
+        let Answer::Choice {
+            choice,
+            confidence,
+            mut probabilities,
+        } = ask::from_json(json)?;
+        let choice = self
+            .options
+            .iter()
+            .position(|o| o.name == choice)
+            .ok_or_else(|| format!("must choose an option of the Choice, not `{choice}`"))?;
+        let count = probabilities.len();
+        let probabilities = self
+            .options
+            .iter()
+            .map(|o| probabilities.remove(&o.name))
+            .collect::<Option<Vec<_>>>()
+            .filter(|_| count == self.options.len())
+            .ok_or("must give a probability for each option of the Choice, and no other")?;
+        let question = self;
+        Ok(ChoiceAnswer {
+            question,
+            choice,
+            confidence,
+            probabilities,
+        })
+    }
+}
+
+// the options keep their order, which a json map sorts
+fn criteria<T, S: Serializer>(options: &&[Entry<T>], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(options.iter().map(|o| (&o.name, &o.description)))
 }
 
 #[cfg(test)]

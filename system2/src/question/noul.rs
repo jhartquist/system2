@@ -19,20 +19,6 @@ struct Criteria {
     r#false: Option<Box<RawValue>>,
 }
 
-#[derive(Serialize)]
-#[serde(tag = "type", rename = "noul")]
-struct Question<'a> {
-    instructions: &'a RawValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    criteria: Option<&'a Criteria>,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum Answer {
-    Noul { noul: f64 },
-}
-
 impl Noul {
     pub fn new(instructions: impl Serialize) -> Result<Self, InvalidNoul> {
         let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
@@ -56,30 +42,6 @@ impl Noul {
     }
 }
 
-impl Ask for Noul {
-    type Answer = NoulAnswer;
-}
-
-impl Sealed for Noul {
-    fn to_json(&self) -> impl Serialize {
-        let instructions = &self.instructions;
-        let criteria = self.criteria.as_ref();
-        Question {
-            instructions,
-            criteria,
-        }
-    }
-
-    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
-        let Answer::Noul { noul: probability } = ask::from_json(json)?;
-        let question = self;
-        Ok(NoulAnswer {
-            question,
-            probability,
-        })
-    }
-}
-
 impl Criteria {
     fn new(criteria: impl Serialize) -> Result<Self, InvalidNoul> {
         let mut fields: HashMap<String, Box<RawValue>> = to_raw_value(&criteria)
@@ -94,6 +56,10 @@ impl Criteria {
         let r#false = take("false").map_err(InvalidNoul::False)?;
         Ok(Criteria { r#true, r#false })
     }
+}
+
+impl Ask for Noul {
+    type Answer = NoulAnswer;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -134,6 +100,40 @@ impl NoulAnswer {
     #[must_use]
     pub fn is_likely(&self) -> bool {
         self.probability >= 0.5
+    }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename = "noul")]
+struct Question<'a> {
+    instructions: &'a RawValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    criteria: Option<&'a Criteria>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum Answer {
+    Noul { noul: f64 },
+}
+
+impl Sealed for Noul {
+    fn to_json(&self) -> impl Serialize {
+        let instructions = &self.instructions;
+        let criteria = self.criteria.as_ref();
+        Question {
+            instructions,
+            criteria,
+        }
+    }
+
+    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
+        let Answer::Noul { noul: probability } = ask::from_json(json)?;
+        let question = self;
+        Ok(NoulAnswer {
+            question,
+            probability,
+        })
     }
 }
 

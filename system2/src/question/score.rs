@@ -19,24 +19,6 @@ struct Entry<L> {
     value: L,
 }
 
-#[derive(Serialize)]
-#[serde(tag = "type", rename = "score")]
-struct Question<'a, L> {
-    instructions: &'a RawValue,
-    #[serde(serialize_with = "criteria")]
-    criteria: &'a [Entry<L>],
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum Answer {
-    Score {
-        score: f64,
-        confidence: f64,
-        probabilities: HashMap<String, f64>,
-    },
-}
-
 impl<L> Score<L> {
     pub fn new(
         instructions: impl Serialize,
@@ -88,52 +70,6 @@ impl<L> Score<L> {
 
 impl<L> Ask for Score<L> {
     type Answer = ScoreAnswer<L>;
-}
-
-impl<L> Sealed for Score<L> {
-    fn to_json(&self) -> impl Serialize {
-        let instructions = &self.instructions;
-        let criteria = self.levels.as_slice();
-        Question {
-            instructions,
-            criteria,
-        }
-    }
-
-    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
-        let Answer::Score {
-            score,
-            confidence,
-            mut probabilities,
-        } = ask::from_json(json)?;
-        let count = probabilities.len();
-        let probabilities = (0..self.levels.len())
-            .map(|index| probabilities.remove(&index.to_string()))
-            .collect::<Option<Vec<_>>>()
-            .filter(|_| count == self.levels.len())
-            .ok_or("must give a probability for each level of the Score, and no other")?;
-
-        // of two equal probabilities, the lower level is the more likely
-        let most_likely = (0..probabilities.len())
-            .max_by(|&a, &b| {
-                probabilities[a]
-                    .total_cmp(&probabilities[b])
-                    .then(b.cmp(&a))
-            })
-            .unwrap_or_default();
-        let question = self;
-        Ok(ScoreAnswer {
-            question,
-            score,
-            confidence,
-            probabilities,
-            most_likely,
-        })
-    }
-}
-
-fn criteria<L, S: Serializer>(levels: &&[Entry<L>], serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(levels.iter().map(|l| &l.level))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -220,6 +156,70 @@ impl<L> ScoreAnswer<L> {
             .map(|(level, probability)| (level.value, probability))
             .collect()
     }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename = "score")]
+struct Question<'a, L> {
+    instructions: &'a RawValue,
+    #[serde(serialize_with = "criteria")]
+    criteria: &'a [Entry<L>],
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum Answer {
+    Score {
+        score: f64,
+        confidence: f64,
+        probabilities: HashMap<String, f64>,
+    },
+}
+
+impl<L> Sealed for Score<L> {
+    fn to_json(&self) -> impl Serialize {
+        let instructions = &self.instructions;
+        let criteria = self.levels.as_slice();
+        Question {
+            instructions,
+            criteria,
+        }
+    }
+
+    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
+        let Answer::Score {
+            score,
+            confidence,
+            mut probabilities,
+        } = ask::from_json(json)?;
+        let count = probabilities.len();
+        let probabilities = (0..self.levels.len())
+            .map(|index| probabilities.remove(&index.to_string()))
+            .collect::<Option<Vec<_>>>()
+            .filter(|_| count == self.levels.len())
+            .ok_or("must give a probability for each level of the Score, and no other")?;
+
+        // of two equal probabilities, the lower level is the more likely
+        let most_likely = (0..probabilities.len())
+            .max_by(|&a, &b| {
+                probabilities[a]
+                    .total_cmp(&probabilities[b])
+                    .then(b.cmp(&a))
+            })
+            .unwrap_or_default();
+        let question = self;
+        Ok(ScoreAnswer {
+            question,
+            score,
+            confidence,
+            probabilities,
+            most_likely,
+        })
+    }
+}
+
+fn criteria<L, S: Serializer>(levels: &&[Entry<L>], serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(levels.iter().map(|l| &l.level))
 }
 
 #[cfg(test)]
