@@ -246,7 +246,6 @@ impl<T> ChoiceAnswer<T> {
         self.confidence
     }
 
-    #[must_use]
     pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&T, f64)> {
         self.question
             .options

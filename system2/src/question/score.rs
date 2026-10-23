@@ -156,7 +156,6 @@ impl<L> ScoreAnswer<L> {
         self.confidence
     }
 
-    #[must_use]
     pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&L, f64)> {
         self.question
             .levels
