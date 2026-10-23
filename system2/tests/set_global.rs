@@ -1,5 +1,3 @@
-#![allow(clippy::float_cmp, reason = "tests check exact API values")]
-
 mod support;
 
 use support::{INSTRUCTIONS, STATE, client_for, mock_api, noul_response};

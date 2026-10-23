@@ -2,10 +2,7 @@
 
 #![forbid(unsafe_code)]
 #![deny(clippy::print_stdout, clippy::print_stderr)]
-#![cfg_attr(
-    test,
-    allow(clippy::float_cmp, reason = "tests check exact API values")
-)]
+#![cfg_attr(not(test), deny(clippy::float_cmp))]
 
 mod ask;
 mod client;
