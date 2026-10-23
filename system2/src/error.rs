@@ -47,15 +47,13 @@ pub enum AskError {
 
 impl AskError {
     pub(crate) fn from_status(status: StatusCode, body: &str, request_id: Option<String>) -> Self {
-        let detail = serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|mut body| body.get_mut("detail").map(Value::take))
-            .unwrap_or_default();
+        let response: Value = serde_json::from_str(body).unwrap_or_default();
+        let detail = &response["detail"];
         if detail["error_type"] == TOKEN_LIMIT {
             return AskError::TokenLimit;
         }
         let reason = status.canonical_reason().filter(|_| body.trim().is_empty());
-        let message = api_message(&detail).unwrap_or_else(|| reason.unwrap_or(body).to_owned());
+        let message = api_message(detail).unwrap_or_else(|| reason.unwrap_or(body).to_owned());
         AskError::Http {
             status: status.as_u16(),
             message,
@@ -135,12 +133,10 @@ mod tests {
 
             let error = AskError::from_status(status, &body, None);
 
-            assert!(
-                matches!(
-                    &error,
-                    AskError::Http { status, message, .. } if *status == code && message == expected
-                ),
-                "{error:?}, expected {code}: {expected}"
+            assert_eq!(
+                error.to_string(),
+                format!("the API refused the request with status {code}: {expected}"),
+                "{body:?}"
             );
         }
     }

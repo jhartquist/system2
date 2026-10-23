@@ -20,5 +20,5 @@ thiserror = "2"
 zstd = "0.14"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "time"] }
 wiremock = "0.6"

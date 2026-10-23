@@ -171,17 +171,14 @@ fn parse_answer(text: &str, request_id: Option<String>) -> Result<NoulAnswer, As
             request_id: request_id.clone(),
         }
     })?;
-    let Response {
-        answers: Answers {
-            q0: Answer::Noul { noul },
-        },
-    } = serde_json::from_value(response).map_err(|error| {
+    let response: Response = serde_json::from_value(response).map_err(|error| {
         let message = format!("must answer each question: {error}");
         AskError::InvalidResponse {
             message,
             request_id,
         }
     })?;
+    let Answer::Noul { noul } = response.answers.q0;
     Ok(NoulAnswer::new(noul))
 }
 
@@ -212,6 +209,7 @@ mod tests {
     use crate::{AskError, Noul};
     use reqwest::header::{HeaderMap, HeaderValue};
     use serde_json::json;
+    use std::time::Duration;
 
     #[test]
     fn endpoint_adds_the_path_of_the_api() {
@@ -231,7 +229,7 @@ mod tests {
         ];
         for (base_url, url) in cases {
             let client = Client::new().base_url(base_url);
-            assert_eq!(client.endpoint().unwrap().as_str(), url);
+            assert_eq!(client.endpoint().unwrap().as_str(), url, "{base_url}");
         }
     }
 
@@ -288,7 +286,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp, reason = "the answer keeps the value of the api")]
     fn parse_answer_takes_a_noul_answer() {
         let text = json!({ "answers": { "q0": { "type": "noul", "noul": 0.92 } } }).to_string();
 
@@ -330,10 +327,12 @@ mod tests {
     }
 
     #[test]
-    fn default_is_new() {
-        assert_eq!(
-            format!("{:?}", Client::default()),
-            format!("{:?}", Client::new())
-        );
+    fn default_uses_the_default_settings() {
+        let client = Client::default();
+
+        assert!(client.api_key.is_none());
+        assert_eq!(client.base_url, "https://api.typesafe.ai");
+        assert_eq!(client.model, "jev-latest");
+        assert_eq!(client.timeout, Duration::from_secs(10));
     }
 }

@@ -36,10 +36,9 @@ pub(crate) fn client_for(server: &MockServer) -> Client {
 }
 
 pub(crate) async fn only_request(server: &MockServer) -> Request {
-    let requests = server.received_requests().await.unwrap();
-    let [request] = <[Request; 1]>::try_from(requests)
-        .unwrap_or_else(|requests| panic!("{} requests", requests.len()));
-    request
+    let mut requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "expected exactly one request");
+    requests.pop().unwrap()
 }
 
 pub(crate) fn request_body(request: &Request) -> Value {

@@ -1,3 +1,5 @@
+#![allow(clippy::float_cmp, reason = "tests check exact API values")]
+
 mod support;
 
 use std::env;
@@ -23,7 +25,7 @@ async fn ask_uses_the_global_client_from_the_environment() {
 
     let answer = Noul::new(INSTRUCTIONS).unwrap().ask(STATE).await.unwrap();
 
-    assert!(answer.probability() >= 0.9);
+    assert_eq!(answer.probability(), 0.92);
     let request = only_request(&server).await;
     assert_eq!(request.headers["authorization"], "Bearer env-key");
     assert_eq!(request_body(&request)["model"], "jev-1.14.0");

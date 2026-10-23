@@ -1,3 +1,5 @@
+#![allow(clippy::float_cmp, reason = "tests check exact API values")]
+
 mod support;
 
 use support::{INSTRUCTIONS, STATE, client_for, mock_api, noul_response};
@@ -13,6 +15,6 @@ async fn set_global_replaces_the_client_of_a_later_ask() {
     client_for(&second).set_global();
     let late = Noul::new(INSTRUCTIONS).unwrap().ask(STATE);
 
-    assert!(early.await.unwrap().probability() <= 0.1);
-    assert!(late.await.unwrap().probability() >= 0.9);
+    assert_eq!(early.await.unwrap().probability(), 0.1);
+    assert_eq!(late.await.unwrap().probability(), 0.9);
 }

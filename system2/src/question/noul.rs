@@ -43,12 +43,8 @@ impl Noul {
     }
 
     pub(crate) fn to_json(&self) -> Value {
-        let Noul {
-            instructions,
-            criteria,
-        } = self;
-        let mut question = json!({ "type": "noul", "instructions": instructions });
-        if let Some(criteria) = criteria {
+        let mut question = json!({ "type": "noul", "instructions": self.instructions });
+        if let Some(criteria) = &self.criteria {
             question["criteria"] = json!(criteria);
         }
         question
@@ -211,7 +207,8 @@ mod tests {
             let noul = Noul::with_criteria("Is it spam?", &criteria).unwrap();
             assert_eq!(
                 noul.to_json(),
-                json!({ "type": "noul", "instructions": "Is it spam?", "criteria": criteria })
+                json!({ "type": "noul", "instructions": "Is it spam?", "criteria": criteria }),
+                "{criteria}"
             );
         }
     }

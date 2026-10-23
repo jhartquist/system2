@@ -1,14 +1,18 @@
+#![allow(clippy::float_cmp, reason = "tests check exact API values")]
+
 mod support;
 
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::error::Error;
-use std::io::Read;
 use std::net::TcpListener;
 use std::time::Duration;
 use support::{
     INSTRUCTIONS, STATE, client_for, mock_api, noul_response, only_request, request_body,
 };
 use system2::{AskError, Client, InvalidJson, Noul};
+use tokio::io::AsyncReadExt;
+use tokio::time::timeout;
 use wiremock::{MockServer, ResponseTemplate};
 
 const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";
@@ -32,7 +36,7 @@ async fn ask_sends_a_noul_and_reads_its_answer() {
         .await
         .unwrap();
 
-    assert!(answer.probability() >= 0.9);
+    assert_eq!(answer.probability(), 0.92);
     let request = only_request(&server).await;
     let header = |name| request.headers[name].to_str().unwrap();
     assert_eq!(header("authorization"), "Bearer key");
@@ -63,38 +67,36 @@ async fn ask_returns_a_future_that_can_be_spawned() {
     drop(state);
     let answer = tokio::spawn(asking).await.unwrap().unwrap();
 
-    assert!(answer.probability() >= 0.9);
+    assert_eq!(answer.probability(), 0.92);
 }
 
 #[tokio::test]
 async fn ask_cancels_the_request_when_dropped() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let client = Client::new()
         .api_key("key")
         .base_url(format!("http://{}", listener.local_addr().unwrap()));
 
-    // a server that reads the request and never answers
-    let received = tokio::task::spawn_blocking(move || {
-        let (mut socket, _) = listener.accept().unwrap();
+    let received = async {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        socket.read_exact(&mut [0]).await.unwrap();
         socket
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        socket.read_exact(&mut [0]).unwrap();
-        socket
-    });
-
-    let asking = client.ask(Noul::new(INSTRUCTIONS).unwrap(), STATE);
-    let mut socket = tokio::select! {
-        _ = asking => panic!("the server never answers"),
-        socket = received => socket.unwrap(),
     };
 
-    // the runtime stays free, so the client can close the connection
-    let closed = tokio::task::spawn_blocking(move || socket.read_to_end(&mut Vec::new()));
-    assert!(
-        closed.await.unwrap().is_ok(),
-        "the connection is still open"
-    );
+    let mut asking = client.ask(Noul::new(INSTRUCTIONS).unwrap(), STATE);
+    let mut socket = tokio::select! {
+        _ = &mut asking => panic!("the server never answers"),
+        socket = timeout(Duration::from_secs(5), received) => {
+            socket.expect("the server must receive the request")
+        },
+    };
+
+    drop(asking);
+
+    timeout(Duration::from_secs(5), socket.read_to_end(&mut Vec::new()))
+        .await
+        .expect("the client must close the connection")
+        .unwrap();
 }
 
 #[tokio::test]
@@ -108,6 +110,24 @@ async fn ask_refuses_a_bad_state_before_a_request() {
 
     assert!(matches!(error, AskError::State(InvalidJson::Empty)));
     assert_eq!(error.to_string(), "the state must not be empty");
+    assert!(no_request_sent(&server).await);
+}
+
+#[tokio::test]
+async fn ask_tells_why_the_state_does_not_serialize() {
+    let server = mock_api(noul_response(0.92)).await;
+    let state = BTreeMap::from([((1, 2), "a pair as a key")]);
+
+    let error = client_for(&server)
+        .ask(Noul::new(INSTRUCTIONS).unwrap(), &state)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AskError::State(InvalidJson::Serialize(_))));
+    assert_eq!(
+        error.to_string(),
+        "the state must serialize to JSON: key must be a string"
+    );
     assert!(no_request_sent(&server).await);
 }
 
@@ -188,16 +208,20 @@ async fn ask_reports_an_error_status() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        &error,
-        AskError::Http { status: 400, request_id: Some(id), .. } if id == REQUEST_ID
-    ));
     assert_eq!(
         error.to_string(),
         format!(
             "the API refused the request with status 400: Unknown model: jev-1.14 (request ID `{REQUEST_ID}`)"
         )
     );
+    let AskError::Http {
+        status, request_id, ..
+    } = error
+    else {
+        panic!("expected an HTTP error, got {error:?}");
+    };
+    assert_eq!(status, 400);
+    assert_eq!(request_id.as_deref(), Some(REQUEST_ID));
 }
 
 #[tokio::test]
@@ -229,14 +253,14 @@ async fn ask_reports_an_invalid_response() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        &error,
-        AskError::InvalidResponse { request_id: Some(id), .. } if id == REQUEST_ID
-    ));
     assert_eq!(
         error.to_string(),
         format!(
             "the response must be JSON: expected value at line 1 column 1 (request ID `{REQUEST_ID}`)"
         )
     );
+    let AskError::InvalidResponse { request_id, .. } = error else {
+        panic!("expected an invalid response, got {error:?}");
+    };
+    assert_eq!(request_id.as_deref(), Some(REQUEST_ID));
 }
