@@ -14,7 +14,8 @@ pub use ask::{Ask, Asking};
 pub use client::Client;
 pub use error::{AskError, InvalidJson};
 pub use question::{
-    Choice, ChoiceAnswer, ChoiceProbability, InvalidChoice, InvalidNoul, Label, Noul, NoulAnswer,
+    Choice, ChoiceAnswer, ChoiceProbability, InvalidChoice, InvalidNoul, InvalidScore, Label, Noul,
+    NoulAnswer, Score, ScoreAnswer, ScoreProbability,
 };
 
 pub mod prelude {
