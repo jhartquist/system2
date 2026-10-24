@@ -10,12 +10,13 @@ mod error;
 mod json;
 mod question;
 
-pub use ask::{Ask, Asking};
+pub use ask::{Ask, AskError, Asking};
 pub use client::Client;
-pub use error::{AskError, InvalidJson};
+pub use error::{Error, Result};
+pub use json::InvalidJson;
 pub use question::{
     Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, InvalidNoul, InvalidScore, Label, Levels,
-    Noul, NoulAnswer, Options, Score, ScoreAnswer, ScoreLevel,
+    Noul, NoulAnswer, Options, QuestionError, Score, ScoreAnswer, ScoreLevel,
 };
 pub use system2_macros::{Levels, Options};
 
