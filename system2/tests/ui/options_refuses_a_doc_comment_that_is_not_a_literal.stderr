@@ -1,0 +1,5 @@
+error: the doc comment must be a string literal: give the description with `#[system2(description = "…")]`
+ --> tests/ui/options_refuses_a_doc_comment_that_is_not_a_literal.rs:5:5
+  |
+5 |     #[doc = concat!("The code ", "panics.")]
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

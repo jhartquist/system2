@@ -1,0 +1,16 @@
+error[E0277]: `String` must derive `Options` to give the options of a Choice
+ --> tests/ui/choice_of_refuses_a_type_without_options.rs:4:13
+  |
+4 |     let _ = Choice::<String>::of("Which name?");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ does not derive `Options`
+  |
+  = help: the trait `Options` is not implemented for `String`
+  = note: add `#[derive(Options)]` to an enum, or use `Choice::with_values` for other types
+note: required by a bound in `Choice::<T>::of`
+ --> src/question/choice.rs
+  |
+  |     pub fn of(instructions: impl Serialize) -> Result<Self, InvalidChoice>
+  |            -- required by a bound in this associated function
+  |     where
+  |         T: Options,
+  |            ^^^^^^^ required by this bound in `Choice::<T>::of`

@@ -3,7 +3,8 @@ mod support;
 use serde_json::json;
 use std::rc::Rc;
 use support::{STATE, client_for, mock_api, only_request, request_text, response};
-use system2::{AskError, Choice, ChoiceOption, Options};
+use system2::prelude::*;
+use system2::{AskError, Choice};
 use wiremock::ResponseTemplate;
 
 const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";
@@ -13,25 +14,23 @@ struct File {
     path: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Options)]
 enum Problem {
+    /// The code returns the wrong value
+    /// for some input.
+    ///
+    /// It does not panic.
+    WrongResult,
+    /// The code panics for some input.
+    #[system2(rename = "panic")]
     Crash,
+    /// The code is slow, but this text is for rustdoc only.
+    #[system2(description = "")]
+    Slow,
+    Style,
+    /// The code is correct.
+    #[system2(rename = "no_problem", description = "The code has no problem.")]
     None,
-}
-
-impl Options for Problem {
-    const OPTIONS: &'static [ChoiceOption<Self>] = &[
-        ChoiceOption {
-            name: "crash",
-            description: Some("The code panics for some input."),
-            value: || Problem::Crash,
-        },
-        ChoiceOption {
-            name: "no_problem",
-            description: None,
-            value: || Problem::None,
-        },
-    ];
 }
 
 fn files() -> Vec<File> {
@@ -98,12 +97,18 @@ async fn ask_gives_back_values_that_are_not_clone() {
 }
 
 #[tokio::test]
-async fn ask_gives_back_a_value_of_the_type() {
+async fn ask_sends_the_options_of_the_derive_and_gives_back_a_value() {
     let server = mock_api(response(&json!({
         "type": "choice",
         "choice": "no_problem",
         "confidence": 0.9,
-        "probabilities": { "crash": 0.05, "no_problem": 0.95 },
+        "probabilities": {
+            "wrong_result": 0.02,
+            "panic": 0.02,
+            "slow": 0.02,
+            "style": 0.02,
+            "no_problem": 0.92,
+        },
     })))
     .await;
     let question = Choice::<Problem>::of("What is the worst problem?").unwrap();
@@ -115,6 +120,17 @@ async fn ask_gives_back_a_value_of_the_type() {
         .into_most_likely();
 
     assert_eq!(problem, Problem::None);
+    let request = only_request(&server).await;
+    assert_eq!(
+        request_text(&request),
+        concat!(
+            r#"{"model":"jev-latest","state":"Buy now!","questions":{"q0":{"type":"choice","#,
+            r#""instructions":"What is the worst problem?","criteria":{"#,
+            r#""wrong_result":"The code returns the wrong value for some input.\n\nIt does not panic.","#,
+            r#""panic":"The code panics for some input.","slow":null,"style":null,"#,
+            r#""no_problem":"The code has no problem."}}}}"#,
+        )
+    );
 }
 
 #[tokio::test]

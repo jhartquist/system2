@@ -1,31 +1,38 @@
 mod support;
 
 use serde_json::json;
-use support::{STATE, client_for, mock_api, only_request, request_text, response};
-use system2::{Levels, Score, ScoreLevel};
+use support::{STATE, client_for, mock_api, only_request, request_body, request_text, response};
+use system2::Score;
+use system2::prelude::*;
 
 #[derive(Debug)]
 struct Risk {
     text: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Levels)]
 enum Severity {
+    /// Nothing breaks.
     Minor,
+    /// Data is lost
+    /// or corrupted.
     Critical,
 }
 
-impl Levels for Severity {
-    const LEVELS: &'static [ScoreLevel<Self>] = &[
-        ScoreLevel {
-            level: "Nothing breaks.",
-            value: || Severity::Minor,
-        },
-        ScoreLevel {
-            level: "Data is lost.",
-            value: || Severity::Critical,
-        },
-    ];
+#[derive(Debug, PartialEq, Levels)]
+enum Effort {
+    Small,
+    LargeChange,
+}
+
+#[derive(Debug, PartialEq, Levels)]
+enum Exposure {
+    /// The default for a new change.
+    #[system2(description = "Low: the change touches no data.")]
+    Low,
+    /// The change needs a second review.
+    #[system2(description = "High: the change can lose data.")]
+    High,
 }
 
 #[tokio::test]
@@ -101,4 +108,48 @@ async fn ask_gives_back_a_value_of_the_type() {
         .into_most_likely();
 
     assert_eq!(severity, Severity::Critical);
+}
+
+#[tokio::test]
+async fn ask_sends_the_descriptions_or_the_names_of_the_derive() {
+    let server = mock_api(response(&json!({
+        "type": "score",
+        "score": 0.5,
+        "confidence": 0.0,
+        "probabilities": { "0": 0.5, "1": 0.5 },
+    })))
+    .await;
+    let client = client_for(&server);
+
+    client
+        .ask(Score::<Severity>::of("How severe?").unwrap(), STATE)
+        .await
+        .unwrap();
+    client
+        .ask(Score::<Effort>::of("How big?").unwrap(), STATE)
+        .await
+        .unwrap();
+    client
+        .ask(Score::<Exposure>::of("How risky?").unwrap(), STATE)
+        .await
+        .unwrap();
+
+    let criteria: Vec<_> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|request| request_body(request)["questions"]["q0"]["criteria"].clone())
+        .collect();
+    assert_eq!(
+        criteria,
+        [
+            json!(["Nothing breaks.", "Data is lost or corrupted."]),
+            json!(["small", "large_change"]),
+            json!([
+                "Low: the change touches no data.",
+                "High: the change can lose data."
+            ]),
+        ]
+    );
 }

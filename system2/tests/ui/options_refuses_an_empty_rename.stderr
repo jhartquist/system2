@@ -1,0 +1,5 @@
+error: the name of an option must not be empty
+ --> tests/ui/options_refuses_an_empty_rename.rs:5:24
+  |
+5 |     #[system2(rename = "")]
+  |                        ^^

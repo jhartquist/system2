@@ -1,0 +1,5 @@
+error: `rename` must occur one time at most
+ --> tests/ui/options_refuses_a_key_two_times.rs:5:33
+  |
+5 |     #[system2(rename = "panic", rename = "crash")]
+  |                                 ^^^^^^

@@ -1,0 +1,5 @@
+error: an option takes only `rename = "…"` and `description = "…"`
+ --> tests/ui/options_refuses_an_unknown_key.rs:5:15
+  |
+5 |     #[system2(name = "crash")]
+  |               ^^^^

@@ -1,0 +1,5 @@
+error: the level `Major` must have a description, because other levels have one: add a doc comment or `#[system2(description = "…")]`
+ --> tests/ui/levels_refuses_a_missing_description.rs:7:5
+  |
+7 |     Major,
+  |     ^^^^^

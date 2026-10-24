@@ -19,6 +19,11 @@ struct Entry<L> {
     value: L,
 }
 
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` must derive `Levels` to give the levels of a Score",
+    label = "does not derive `Levels`",
+    note = "add `#[derive(Levels)]` to an enum, or use `Score::with_values` for other types"
+)]
 pub trait Levels: Sized + 'static {
     // only the derive writes the table, so its shape can change
     #[doc(hidden)]

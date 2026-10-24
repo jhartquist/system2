@@ -1,0 +1,5 @@
+error: a level takes only `description = "…"`
+ --> tests/ui/levels_refuses_rename.rs:5:15
+  |
+5 |     #[system2(rename = "minor")]
+  |               ^^^^^^

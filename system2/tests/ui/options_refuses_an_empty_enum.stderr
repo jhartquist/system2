@@ -1,0 +1,5 @@
+error: a Choice must have 1 to 255 options, not 0
+ --> tests/ui/options_refuses_an_empty_enum.rs:4:6
+  |
+4 | enum Problem {}
+  |      ^^^^^^^

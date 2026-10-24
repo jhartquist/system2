@@ -17,7 +17,8 @@ pub use question::{
     Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, InvalidNoul, InvalidScore, Label, Levels,
     Noul, NoulAnswer, Options, Score, ScoreAnswer, ScoreLevel,
 };
+pub use system2_macros::{Levels, Options};
 
 pub mod prelude {
-    pub use crate::Ask;
+    pub use crate::{Ask, Levels, Options};
 }

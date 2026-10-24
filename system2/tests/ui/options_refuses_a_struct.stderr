@@ -1,0 +1,5 @@
+error: `#[derive(Options)]` needs an enum: use `Choice::with_values` for other types
+ --> tests/ui/options_refuses_a_struct.rs:4:8
+  |
+4 | struct Problem;
+  |        ^^^^^^^

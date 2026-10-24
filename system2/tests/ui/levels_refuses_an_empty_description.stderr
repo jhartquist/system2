@@ -1,0 +1,5 @@
+error: the description of a level must not be empty
+ --> tests/ui/levels_refuses_an_empty_description.rs:7:5
+  |
+7 |     Minor,
+  |     ^^^^^

@@ -1,0 +1,5 @@
+error: a Score must have 1 to 10 levels, not 11
+  --> tests/ui/levels_refuses_too_many_variants.rs:15:5
+   |
+15 |     S11,
+   |     ^^^

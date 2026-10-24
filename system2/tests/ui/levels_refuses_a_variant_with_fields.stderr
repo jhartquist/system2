@@ -1,0 +1,5 @@
+error: the variant `Minor` must have no fields: use `Score::with_values` for levels that hold data
+ --> tests/ui/levels_refuses_a_variant_with_fields.rs:5:5
+  |
+5 |     Minor { count: u8 },
+  |     ^^^^^

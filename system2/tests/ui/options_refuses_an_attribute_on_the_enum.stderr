@@ -1,0 +1,5 @@
+error: `#[system2]` must be on a variant, not on the enum
+ --> tests/ui/options_refuses_an_attribute_on_the_enum.rs:4:1
+  |
+4 | #[system2(rename = "problem")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

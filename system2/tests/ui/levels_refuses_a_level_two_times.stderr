@@ -1,0 +1,5 @@
+error: each level must have a different description, but `Major` has the same description as `Minor`
+ --> tests/ui/levels_refuses_a_level_two_times.rs:8:5
+  |
+8 |     Major,
+  |     ^^^^^

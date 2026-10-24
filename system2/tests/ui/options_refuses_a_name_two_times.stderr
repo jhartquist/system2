@@ -1,0 +1,5 @@
+error: each option must have a different name, but two options have the name `hand_off`: rename one with `#[system2(rename = "…")]`
+ --> tests/ui/options_refuses_a_name_two_times.rs:6:24
+  |
+6 |     #[system2(rename = "hand_off")]
+  |                        ^^^^^^^^^^

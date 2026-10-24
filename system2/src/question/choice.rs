@@ -21,6 +21,11 @@ struct Entry<T> {
     value: T,
 }
 
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` must derive `Options` to give the options of a Choice",
+    label = "does not derive `Options`",
+    note = "add `#[derive(Options)]` to an enum, or use `Choice::with_values` for other types"
+)]
 pub trait Options: Sized + 'static {
     // only the derive writes the table, so its shape can change
     #[doc(hidden)]

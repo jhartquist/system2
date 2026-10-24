@@ -1,0 +1,5 @@
+error: the variant `Crash` must have no fields: use `Choice::with_values` for options that hold data
+ --> tests/ui/options_refuses_a_variant_with_fields.rs:5:5
+  |
+5 |     Crash(u8),
+  |     ^^^^^
