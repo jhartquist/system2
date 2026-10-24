@@ -1,6 +1,7 @@
 use crate::ask::{self, private::Sealed};
 use crate::{Ask, InvalidJson, json};
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::value::{RawValue, to_raw_value};
 use std::collections::HashMap;
@@ -100,6 +101,14 @@ impl NoulAnswer {
     #[must_use]
     pub fn is_likely(&self) -> bool {
         self.probability >= 0.5
+    }
+}
+
+impl Serialize for NoulAnswer {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut answer = serializer.serialize_struct("NoulAnswer", 1)?;
+        answer.serialize_field("probability", &self.probability)?;
+        answer.end()
     }
 }
 
@@ -280,6 +289,19 @@ mod tests {
         assert_eq!(
             error,
             "must answer each question: unknown variant `box`, expected `noul`"
+        );
+    }
+
+    #[test]
+    fn serialize_gives_the_probability() {
+        let noul = Noul::new("Is it spam?").unwrap();
+        let answer = noul
+            .into_answer(json!({ "type": "noul", "noul": 0.92 }))
+            .unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&answer).unwrap(),
+            r#"{"probability":0.92}"#
         );
     }
 

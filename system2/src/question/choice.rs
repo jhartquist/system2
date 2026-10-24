@@ -1,5 +1,6 @@
 use crate::ask::{self, private::Sealed};
 use crate::{Ask, InvalidJson, json};
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::value::RawValue;
@@ -267,6 +268,19 @@ impl<T> ChoiceAnswer<T> {
             .zip(self.probabilities)
             .map(|(option, probability)| (option.value, probability))
             .collect()
+    }
+}
+
+impl<T> Serialize for ChoiceAnswer<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // the names, so a value needs no `Serialize`
+        let names: Vec<_> = self.question.options.iter().map(|o| &o.name).collect();
+        let mut answer = serializer.serialize_struct("ChoiceAnswer", 4)?;
+        answer.serialize_field("most_likely", names[self.choice])?;
+        answer.serialize_field("confidence", &self.confidence)?;
+        answer.serialize_field("options", &names)?;
+        answer.serialize_field("probabilities", &self.probabilities)?;
+        answer.end()
     }
 }
 
@@ -646,6 +660,26 @@ mod tests {
 
         assert_eq!(top, [(&"python", 0.4), (&"go", 0.4)]);
         assert_eq!(all, [(&"python", 0.4), (&"go", 0.4), (&"rust", 0.2)]);
+    }
+
+    #[test]
+    fn serialize_gives_the_names_and_the_probabilities_in_order() {
+        // not `Serialize`, so the answer writes the names
+        struct File(&'static str);
+        let files = [File("main.rs"), File("lib.rs")];
+        let choice = Choice::with_values("Which file?", files, |f| f.0).unwrap();
+        let probabilities = json!({ "main.rs": 0.3, "lib.rs": 0.7 });
+        let answer = choice
+            .into_answer(answer("lib.rs", &probabilities))
+            .unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&answer).unwrap(),
+            concat!(
+                r#"{"most_likely":"lib.rs","confidence":0.6,"#,
+                r#""options":["main.rs","lib.rs"],"probabilities":[0.3,0.7]}"#,
+            )
+        );
     }
 
     #[test]

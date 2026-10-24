@@ -1,5 +1,6 @@
 use crate::ask::{self, private::Sealed};
 use crate::{Ask, InvalidJson, json};
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::value::RawValue;
@@ -177,6 +178,20 @@ impl<L> ScoreAnswer<L> {
             .zip(self.probabilities)
             .map(|(level, probability)| (level.value, probability))
             .collect()
+    }
+}
+
+impl<L> Serialize for ScoreAnswer<L> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // the levels as sent, so a value needs no `Serialize`
+        let levels: Vec<_> = self.question.levels.iter().map(|l| &l.level).collect();
+        let mut answer = serializer.serialize_struct("ScoreAnswer", 5)?;
+        answer.serialize_field("score", &self.score)?;
+        answer.serialize_field("most_likely", levels[self.most_likely])?;
+        answer.serialize_field("confidence", &self.confidence)?;
+        answer.serialize_field("levels", &levels)?;
+        answer.serialize_field("probabilities", &self.probabilities)?;
+        answer.end()
     }
 }
 
@@ -483,6 +498,34 @@ mod tests {
                 "{probabilities}"
             );
         }
+    }
+
+    #[test]
+    fn serialize_gives_the_levels_and_the_probabilities_in_order() {
+        // not `Serialize`, so the answer writes the levels as they were sent
+        struct Days(u32);
+        #[derive(Serialize)]
+        struct Span {
+            unit: &'static str,
+            count: u32,
+        }
+        let days = [Days(1), Days(5), Days(20)];
+        let score = Score::with_values("How long?", days, |d| Span {
+            unit: "day",
+            count: d.0,
+        })
+        .unwrap();
+        let probabilities = json!({ "0": 0.1, "1": 0.5, "2": 0.4 });
+        let answer = score.into_answer(answer(&probabilities)).unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&answer).unwrap(),
+            concat!(
+                r#"{"score":1.3,"most_likely":{"unit":"day","count":5},"confidence":0.4,"#,
+                r#""levels":[{"unit":"day","count":1},{"unit":"day","count":5},"#,
+                r#"{"unit":"day","count":20}],"probabilities":[0.1,0.5,0.4]}"#,
+            )
+        );
     }
 
     #[test]
