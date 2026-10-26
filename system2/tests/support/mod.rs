@@ -1,8 +1,8 @@
 #![allow(dead_code, reason = "each test file uses some of the helpers")]
 #![allow(clippy::unwrap_used, reason = "test helpers can unwrap")]
 
-use serde_json::{Value, json};
-use system2::Client;
+use serde_json::{Map, Value, json};
+use system2::{Client, Noul};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
@@ -24,19 +24,43 @@ pub(crate) async fn mount(server: &MockServer, response: ResponseTemplate) {
 }
 
 pub(crate) fn noul_response(probability: f64) -> ResponseTemplate {
-    response(&json!({ "type": "noul", "noul": probability }))
+    response(&noul_answer(probability))
 }
 
 pub(crate) fn response(answer: &Value) -> ResponseTemplate {
+    answer_set_response(&[answer])
+}
+
+pub(crate) fn answer_set_response(answers: &[&Value]) -> ResponseTemplate {
+    let answers: Map<String, Value> = answers
+        .iter()
+        .enumerate()
+        .map(|(index, &answer)| (format!("q{index}"), answer.clone()))
+        .collect();
     ResponseTemplate::new(200).set_body_json(json!({
         "model": "jev-1.13.0",
-        "answers": { "q0": answer },
+        "answers": answers,
         "usage": { "input_tokens": 280, "output_tokens": 1 },
     }))
 }
 
+pub(crate) fn noul_answer(probability: f64) -> Value {
+    json!({ "type": "noul", "noul": probability })
+}
+
+pub(crate) fn noul(instructions: &str) -> Noul {
+    Noul::new(instructions).unwrap()
+}
+
 pub(crate) fn client_for(server: &MockServer) -> Client {
     Client::new().api_key("key").base_url(server.uri())
+}
+
+pub(crate) async fn no_request_sent(server: &MockServer) -> bool {
+    server
+        .received_requests()
+        .await
+        .is_some_and(|requests| requests.is_empty())
 }
 
 pub(crate) async fn only_request(server: &MockServer) -> Request {

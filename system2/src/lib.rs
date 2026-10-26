@@ -10,7 +10,7 @@ mod error;
 mod json;
 mod question;
 
-pub use ask::{Ask, AskError, Asking};
+pub use ask::{AskError, AskFuture, AskIterator, QuestionSet};
 pub use client::Client;
 pub use error::{Error, Result};
 pub use json::InvalidJson;
@@ -21,5 +21,6 @@ pub use question::{
 pub use system2_macros::{Levels, Options};
 
 pub mod prelude {
-    pub use crate::{Ask, Levels, Options};
+    #[doc(no_inline)]
+    pub use crate::{AskIterator, Levels, Options, QuestionSet};
 }

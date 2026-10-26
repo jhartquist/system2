@@ -6,21 +6,15 @@ use std::error::Error;
 use std::net::TcpListener;
 use std::time::Duration;
 use support::{
-    INSTRUCTIONS, STATE, client_for, mock_api, noul_response, only_request, request_body,
+    INSTRUCTIONS, STATE, client_for, mock_api, no_request_sent, noul_response, only_request,
+    request_body,
 };
 use system2::{AskError, Client, InvalidJson, Noul};
 use tokio::io::AsyncReadExt;
 use tokio::time::timeout;
-use wiremock::{MockServer, ResponseTemplate};
+use wiremock::ResponseTemplate;
 
 const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";
-
-async fn no_request_sent(server: &MockServer) -> bool {
-    server
-        .received_requests()
-        .await
-        .is_some_and(|requests| requests.is_empty())
-}
 
 #[tokio::test]
 async fn ask_sends_a_noul_and_reads_its_answer() {

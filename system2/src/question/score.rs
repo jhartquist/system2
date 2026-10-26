@@ -1,8 +1,7 @@
-use crate::ask::{self, private::Sealed};
-use crate::{Ask, InvalidJson, json};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+use crate::{InvalidJson, QuestionSet, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::Value;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 
@@ -102,8 +101,8 @@ impl<L> Score<L> {
     }
 }
 
-impl<L> Ask for Score<L> {
-    type Answer = ScoreAnswer<L>;
+impl<L> QuestionSet for Score<L> {
+    type AnswerSet = ScoreAnswer<L>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -214,21 +213,24 @@ enum Answer {
 }
 
 impl<L> Sealed for Score<L> {
-    fn to_json(&self) -> impl Serialize {
+    fn write(&self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
         let criteria = self.levels.as_slice();
-        Question {
+        raw_question_set.push(&Question {
             instructions,
             criteria,
-        }
+        });
     }
 
-    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
+    fn read(
+        self,
+        raw_answer_set: &mut RawAnswerSet,
+    ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
         let Answer::Score {
             score,
             confidence,
             mut probabilities,
-        } = ask::from_json(json)?;
+        } = raw_answer_set.next()?;
         let count = probabilities.len();
         let probabilities = (0..self.levels.len())
             .map(|index| probabilities.remove(&index.to_string()))
@@ -263,12 +265,18 @@ fn criteria<L, S: Serializer>(levels: &&[Entry<L>], serializer: S) -> Result<S::
 mod tests {
     use super::{InvalidScore, Levels, Score, ScoreAnswer, ScoreLevel};
     use crate::InvalidJson;
-    use crate::ask::private::Sealed;
+    use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     use serde::Serialize;
     use serde_json::{Value, json};
 
     fn serialized<L>(score: &Score<L>) -> String {
-        serde_json::to_string(&score.to_json()).unwrap()
+        let mut raw_question_set = RawQuestionSet::default();
+        score.write(&mut raw_question_set);
+        raw_question_set.texts()[0].to_owned()
+    }
+
+    fn read<L>(score: Score<L>, answer: Value) -> Result<ScoreAnswer<L>, String> {
+        score.read(&mut RawAnswerSet::of(vec![answer]))
     }
 
     fn answer(probabilities: &Value) -> Value {
@@ -304,7 +312,7 @@ mod tests {
 
     fn sizes(probabilities: &Value) -> ScoreAnswer<&'static str> {
         let score = Score::new("How big?", ["A line.", "A function.", "A module."]).unwrap();
-        score.into_answer(answer(probabilities)).unwrap()
+        read(score, answer(probabilities)).unwrap()
     }
 
     #[test]
@@ -441,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn into_answer_keeps_the_values_of_the_api() {
+    fn read_keeps_the_values_of_the_api() {
         let answer = sizes(&json!({ "0": 0.1, "1": 0.5, "2": 0.4 }));
 
         assert_eq!(answer.score(), 1.3);
@@ -459,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn into_answer_refuses_an_answer_that_does_not_fit() {
+    fn read_refuses_an_answer_that_does_not_fit() {
         let cases = [
             (
                 json!({ "type": "noul", "noul": 0.5 }),
@@ -480,7 +488,7 @@ mod tests {
         ];
         for (json, message) in cases {
             let score = Score::new("How big?", ["A line.", "A function.", "A module."]).unwrap();
-            assert_eq!(score.into_answer(json).unwrap_err(), message);
+            assert_eq!(read(score, json).unwrap_err(), message);
         }
     }
 
@@ -516,7 +524,7 @@ mod tests {
         })
         .unwrap();
         let probabilities = json!({ "0": 0.1, "1": 0.5, "2": 0.4 });
-        let answer = score.into_answer(answer(&probabilities)).unwrap();
+        let answer = read(score, answer(&probabilities)).unwrap();
 
         assert_eq!(
             serde_json::to_string(&answer).unwrap(),

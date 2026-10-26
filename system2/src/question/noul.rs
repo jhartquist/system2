@@ -1,8 +1,7 @@
-use crate::ask::{self, private::Sealed};
-use crate::{Ask, InvalidJson, json};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+use crate::{InvalidJson, QuestionSet, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::Value;
 use serde_json::value::{RawValue, to_raw_value};
 use std::collections::HashMap;
 
@@ -59,8 +58,8 @@ impl Criteria {
     }
 }
 
-impl Ask for Noul {
-    type Answer = NoulAnswer;
+impl QuestionSet for Noul {
+    type AnswerSet = NoulAnswer;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -127,17 +126,20 @@ enum Answer {
 }
 
 impl Sealed for Noul {
-    fn to_json(&self) -> impl Serialize {
+    fn write(&self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
         let criteria = self.criteria.as_ref();
-        Question {
+        raw_question_set.push(&Question {
             instructions,
             criteria,
-        }
+        });
     }
 
-    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
-        let Answer::Noul { noul: probability } = ask::from_json(json)?;
+    fn read(
+        self,
+        raw_answer_set: &mut RawAnswerSet,
+    ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
+        let Answer::Noul { noul: probability } = raw_answer_set.next()?;
         let question = self;
         Ok(NoulAnswer {
             question,
@@ -150,12 +152,18 @@ impl Sealed for Noul {
 mod tests {
     use super::{InvalidNoul, Noul, NoulAnswer};
     use crate::InvalidJson;
-    use crate::ask::private::Sealed;
+    use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
     fn serialized(noul: &Noul) -> Value {
-        serde_json::to_value(noul.to_json()).unwrap()
+        let mut raw_question_set = RawQuestionSet::default();
+        noul.write(&mut raw_question_set);
+        serde_json::from_str(raw_question_set.texts()[0]).unwrap()
+    }
+
+    fn read(noul: Noul, answer: Value) -> Result<NoulAnswer, String> {
+        noul.read(&mut RawAnswerSet::of(vec![answer]))
     }
 
     #[test]
@@ -236,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn to_json_has_the_type_and_the_instructions() {
+    fn write_gives_the_type_and_the_instructions() {
         let noul = Noul::new("Is it spam?").unwrap();
 
         assert_eq!(
@@ -246,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn to_json_has_only_the_criteria_of_the_noul() {
+    fn write_gives_only_the_criteria_of_the_noul() {
         let cases = [
             json!({ "true": "It sells a product." }),
             json!({ "false": { "covers": "questions and replies" } }),
@@ -263,12 +271,10 @@ mod tests {
     }
 
     #[test]
-    fn into_answer_takes_the_probability_and_keeps_the_question() {
+    fn read_takes_the_probability_and_keeps_the_question() {
         let noul = Noul::new("Is it spam?").unwrap();
 
-        let answer = noul
-            .into_answer(json!({ "type": "noul", "noul": 0.92 }))
-            .unwrap();
+        let answer = read(noul, json!({ "type": "noul", "noul": 0.92 })).unwrap();
 
         assert_eq!(answer.probability(), 0.92);
         assert_eq!(answer.question().instructions.get(), r#""Is it spam?""#);
@@ -279,12 +285,10 @@ mod tests {
     }
 
     #[test]
-    fn into_answer_refuses_another_type_of_answer() {
+    fn read_refuses_another_type_of_answer() {
         let noul = Noul::new("Is it spam?").unwrap();
 
-        let error = noul
-            .into_answer(json!({ "type": "box", "confidence": 0.9 }))
-            .unwrap_err();
+        let error = read(noul, json!({ "type": "box", "confidence": 0.9 })).unwrap_err();
 
         assert_eq!(
             error,
@@ -295,9 +299,7 @@ mod tests {
     #[test]
     fn serialize_gives_the_probability() {
         let noul = Noul::new("Is it spam?").unwrap();
-        let answer = noul
-            .into_answer(json!({ "type": "noul", "noul": 0.92 }))
-            .unwrap();
+        let answer = read(noul, json!({ "type": "noul", "noul": 0.92 })).unwrap();
 
         assert_eq!(
             serde_json::to_string(&answer).unwrap(),

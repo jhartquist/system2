@@ -1,8 +1,7 @@
-use crate::ask::{self, private::Sealed};
-use crate::{Ask, InvalidJson, json};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+use crate::{InvalidJson, QuestionSet, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::Value;
 use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -190,8 +189,8 @@ impl<T> Entry<T> {
     }
 }
 
-impl<T> Ask for Choice<T> {
-    type Answer = ChoiceAnswer<T>;
+impl<T> QuestionSet for Choice<T> {
+    type AnswerSet = ChoiceAnswer<T>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -303,21 +302,24 @@ enum Answer {
 }
 
 impl<T> Sealed for Choice<T> {
-    fn to_json(&self) -> impl Serialize {
+    fn write(&self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
         let criteria = self.options.as_slice();
-        Question {
+        raw_question_set.push(&Question {
             instructions,
             criteria,
-        }
+        });
     }
 
-    fn into_answer(self, json: Value) -> Result<<Self as Ask>::Answer, String> {
+    fn read(
+        self,
+        raw_answer_set: &mut RawAnswerSet,
+    ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
         let Answer::Choice {
             choice,
             confidence,
             mut probabilities,
-        } = ask::from_json(json)?;
+        } = raw_answer_set.next()?;
         let choice = self
             .options
             .iter()
@@ -341,7 +343,7 @@ impl<T> Sealed for Choice<T> {
     }
 }
 
-// the options keep their order, which a json map sorts
+// by hand, as a `serde_json::Map` would sort the options by name
 fn criteria<T, S: Serializer>(options: &&[Entry<T>], serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_map(options.iter().map(|o| (&o.name, &o.description)))
 }
@@ -350,12 +352,18 @@ fn criteria<T, S: Serializer>(options: &&[Entry<T>], serializer: S) -> Result<S:
 mod tests {
     use super::{Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, Options};
     use crate::InvalidJson;
-    use crate::ask::private::Sealed;
+    use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     use serde_json::{Map, Value, json};
     use std::collections::BTreeMap;
 
     fn serialized<T>(choice: &Choice<T>) -> String {
-        serde_json::to_string(&choice.to_json()).unwrap()
+        let mut raw_question_set = RawQuestionSet::default();
+        choice.write(&mut raw_question_set);
+        raw_question_set.texts()[0].to_owned()
+    }
+
+    fn read<T>(choice: Choice<T>, answer: Value) -> Result<ChoiceAnswer<T>, String> {
+        choice.read(&mut RawAnswerSet::of(vec![answer]))
     }
 
     fn answer(choice: &str, probabilities: &Value) -> Value {
@@ -393,7 +401,7 @@ mod tests {
     fn languages() -> ChoiceAnswer<&'static str> {
         let choice = Choice::new("Which language?", ["rust", "python", "go"]).unwrap();
         let probabilities = json!({ "rust": 0.2, "python": 0.4, "go": 0.4 });
-        choice.into_answer(answer("go", &probabilities)).unwrap()
+        read(choice, answer("go", &probabilities)).unwrap()
     }
 
     #[test]
@@ -608,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn into_answer_keeps_the_values_of_the_api() {
+    fn read_keeps_the_values_of_the_api() {
         let answer = languages();
 
         assert_eq!(*answer.most_likely(), "go");
@@ -622,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn into_answer_refuses_an_answer_that_does_not_fit() {
+    fn read_refuses_an_answer_that_does_not_fit() {
         let cases = [
             (
                 json!({ "type": "noul", "noul": 0.5 }),
@@ -647,7 +655,7 @@ mod tests {
         ];
         for (json, message) in cases {
             let choice = Choice::new("Which language?", ["rust", "go"]).unwrap();
-            assert_eq!(choice.into_answer(json).unwrap_err(), message);
+            assert_eq!(read(choice, json).unwrap_err(), message);
         }
     }
 
@@ -669,9 +677,7 @@ mod tests {
         let files = [File("main.rs"), File("lib.rs")];
         let choice = Choice::with_values("Which file?", files, |f| f.0).unwrap();
         let probabilities = json!({ "main.rs": 0.3, "lib.rs": 0.7 });
-        let answer = choice
-            .into_answer(answer("lib.rs", &probabilities))
-            .unwrap();
+        let answer = read(choice, answer("lib.rs", &probabilities)).unwrap();
 
         assert_eq!(
             serde_json::to_string(&answer).unwrap(),
