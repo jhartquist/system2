@@ -1,13 +1,23 @@
 use super::wire::{RawAnswerSet, RawQuestionSet, Sealed};
-use crate::{AskFuture, Client};
+use crate::{AskFuture, Client, Tagged};
 use serde::Serialize;
 use std::array;
 
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a question set",
+    label = "not a question set",
+    note = "a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets",
+    note = "to ask a question again, clone it; a reference to a question is not a question set"
+)]
 pub trait QuestionSet: Sized + Sealed {
     type AnswerSet;
 
     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Self> {
         Client::global().ask(self, state)
+    }
+
+    fn tag<T>(self, tag: T) -> Tagged<Self, T> {
+        Tagged::new(self, tag)
     }
 }
 
@@ -22,11 +32,11 @@ pub trait AskIterator: Iterator + Sized {
 
 impl<I: Iterator> AskIterator for I {}
 
-impl<T: QuestionSet> QuestionSet for Vec<T> {
-    type AnswerSet = Vec<T::AnswerSet>;
+impl<Q: QuestionSet> QuestionSet for Vec<Q> {
+    type AnswerSet = Vec<Q::AnswerSet>;
 }
 
-impl<T: QuestionSet> Sealed for Vec<T> {
+impl<Q: QuestionSet> Sealed for Vec<Q> {
     fn write(&self, raw_question_set: &mut RawQuestionSet) {
         for question_set in self {
             question_set.write(raw_question_set);
@@ -43,11 +53,11 @@ impl<T: QuestionSet> Sealed for Vec<T> {
     }
 }
 
-impl<T: QuestionSet, const N: usize> QuestionSet for [T; N] {
-    type AnswerSet = [T::AnswerSet; N];
+impl<Q: QuestionSet, const N: usize> QuestionSet for [Q; N] {
+    type AnswerSet = [Q::AnswerSet; N];
 }
 
-impl<T: QuestionSet, const N: usize> Sealed for [T; N] {
+impl<Q: QuestionSet, const N: usize> Sealed for [Q; N] {
     fn write(&self, raw_question_set: &mut RawQuestionSet) {
         for question_set in self {
             question_set.write(raw_question_set);
@@ -69,11 +79,11 @@ impl<T: QuestionSet, const N: usize> Sealed for [T; N] {
     }
 }
 
-impl<T: QuestionSet> QuestionSet for Option<T> {
-    type AnswerSet = Option<T::AnswerSet>;
+impl<Q: QuestionSet> QuestionSet for Option<Q> {
+    type AnswerSet = Option<Q::AnswerSet>;
 }
 
-impl<T: QuestionSet> Sealed for Option<T> {
+impl<Q: QuestionSet> Sealed for Option<Q> {
     fn write(&self, raw_question_set: &mut RawQuestionSet) {
         if let Some(question_set) = self {
             question_set.write(raw_question_set);

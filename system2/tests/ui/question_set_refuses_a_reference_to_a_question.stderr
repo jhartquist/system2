@@ -1,0 +1,29 @@
+error[E0277]: `&system2::Noul` is not a question set
+ --> tests/ui/question_set_refuses_a_reference_to_a_question.rs:6:30
+  |
+6 |     let _ = questions.iter().ask("Buy now!");
+  |                              ^^^ not a question set
+  |
+  = help: the trait `system2::QuestionSet` is not implemented for `&system2::Noul`
+  = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
+  = note: to ask a question again, clone it; a reference to a question is not a question set
+help: the trait `system2::QuestionSet` is implemented for `system2::Noul`
+ --> src/question/noul.rs
+  |
+  | impl QuestionSet for Noul {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^
+note: the method call chain might not have had the expected associated types
+ --> tests/ui/question_set_refuses_a_reference_to_a_question.rs:6:23
+  |
+5 |     let questions = vec![Noul::new("Is it spam?").unwrap()];
+  |                     --------------------------------------- this expression has type `Vec<Noul>`
+6 |     let _ = questions.iter().ask("Buy now!");
+  |                       ^^^^^^ `Iterator::Item` is `&Noul` here
+note: required by a bound in `system2::AskIterator::ask`
+ --> src/ask/question_set.rs
+  |
+  |     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Vec<Self::Item>>
+  |        --- required by a bound in this associated function
+  |     where
+  |         Self::Item: QuestionSet,
+  |                     ^^^^^^^^^^^ required by this bound in `AskIterator::ask`

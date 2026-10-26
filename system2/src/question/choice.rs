@@ -1,5 +1,5 @@
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
-use crate::{InvalidJson, QuestionSet, json};
+use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
@@ -9,16 +9,16 @@ use std::fmt::Display;
 const MAX_OPTIONS: usize = 255;
 
 #[derive(Debug, Clone)]
-pub struct Choice<T> {
+pub struct Choice<O> {
     instructions: Box<RawValue>,
-    options: Vec<Entry<T>>,
+    options: Vec<Entry<O>>,
 }
 
 #[derive(Debug, Clone)]
-struct Entry<T> {
+struct Entry<O> {
     name: String,
     description: Option<Box<RawValue>>,
-    value: T,
+    value: O,
 }
 
 #[diagnostic::on_unimplemented(
@@ -34,10 +34,10 @@ pub trait Options: Sized + 'static {
 
 #[doc(hidden)]
 #[derive(Debug)]
-pub struct ChoiceOption<T> {
+pub struct ChoiceOption<O> {
     pub name: &'static str,
     pub description: Option<&'static str>,
-    pub value: fn() -> T,
+    pub value: fn() -> O,
 }
 
 pub trait Label: label::Parts {}
@@ -91,23 +91,23 @@ mod label {
     );
 }
 
-impl<T> Choice<T> {
+impl<O> Choice<O> {
     pub fn new(
         instructions: impl Serialize,
-        items: impl IntoIterator<Item = T>,
+        items: impl IntoIterator<Item = O>,
     ) -> Result<Self, InvalidChoice>
     where
-        T: Display,
+        O: Display,
     {
         Self::with_values(instructions, items, ToString::to_string)
     }
 
     pub fn with_descriptions<D: Serialize>(
         instructions: impl Serialize,
-        options: impl IntoIterator<Item = (T, D)>,
+        options: impl IntoIterator<Item = (O, D)>,
     ) -> Result<Self, InvalidChoice>
     where
-        T: Display,
+        O: Display,
     {
         let instructions = json::validate(instructions).map_err(InvalidChoice::Instructions)?;
         let options = options
@@ -123,8 +123,8 @@ impl<T> Choice<T> {
 
     pub fn with_values<L: Label>(
         instructions: impl Serialize,
-        values: impl IntoIterator<Item = T>,
-        mut label: impl FnMut(&T) -> L,
+        values: impl IntoIterator<Item = O>,
+        mut label: impl FnMut(&O) -> L,
     ) -> Result<Self, InvalidChoice> {
         let instructions = json::validate(instructions).map_err(InvalidChoice::Instructions)?;
         let options = values
@@ -139,10 +139,10 @@ impl<T> Choice<T> {
 
     pub fn of(instructions: impl Serialize) -> Result<Self, InvalidChoice>
     where
-        T: Options,
+        O: Options,
     {
         let instructions = json::validate(instructions).map_err(InvalidChoice::Instructions)?;
-        let options = T::OPTIONS
+        let options = O::OPTIONS
             .iter()
             .map(|option| {
                 let description = json::validate_optional(option.description);
@@ -152,7 +152,11 @@ impl<T> Choice<T> {
         Self::checked(instructions, options)
     }
 
-    fn checked(instructions: Box<RawValue>, options: Vec<Entry<T>>) -> Result<Self, InvalidChoice> {
+    pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
+        Tagged::new(self, tag)
+    }
+
+    fn checked(instructions: Box<RawValue>, options: Vec<Entry<O>>) -> Result<Self, InvalidChoice> {
         if !(1..=MAX_OPTIONS).contains(&options.len()) {
             return Err(InvalidChoice::Count(options.len()));
         }
@@ -171,11 +175,11 @@ impl<T> Choice<T> {
     }
 }
 
-impl<T> Entry<T> {
+impl<O> Entry<O> {
     fn new(
         name: String,
         description: Result<Option<Box<RawValue>>, InvalidJson>,
-        value: T,
+        value: O,
     ) -> Result<Self, InvalidChoice> {
         let description = match description {
             Ok(description) => description,
@@ -189,8 +193,8 @@ impl<T> Entry<T> {
     }
 }
 
-impl<T> QuestionSet for Choice<T> {
-    type AnswerSet = ChoiceAnswer<T>;
+impl<O> QuestionSet for Choice<O> {
+    type AnswerSet = ChoiceAnswer<O>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -209,36 +213,36 @@ pub enum InvalidChoice {
 }
 
 #[derive(Debug, Clone)]
-pub struct ChoiceAnswer<T> {
-    question: Choice<T>,
+pub struct ChoiceAnswer<O> {
+    question: Choice<O>,
     choice: usize,
     confidence: f64,
     probabilities: Vec<f64>,
 }
 
-impl<T> ChoiceAnswer<T> {
+impl<O> ChoiceAnswer<O> {
     #[must_use]
-    pub fn question(&self) -> &Choice<T> {
+    pub fn question(&self) -> &Choice<O> {
         &self.question
     }
 
     #[must_use]
-    pub fn into_question(self) -> Choice<T> {
+    pub fn into_question(self) -> Choice<O> {
         self.question
     }
 
     #[must_use]
-    pub fn most_likely(&self) -> &T {
+    pub fn most_likely(&self) -> &O {
         &self.question.options[self.choice].value
     }
 
     #[must_use]
-    pub fn into_most_likely(self) -> T {
+    pub fn into_most_likely(self) -> O {
         let mut options = self.question.options;
         options.swap_remove(self.choice).value
     }
 
-    pub fn top(&self, n: usize) -> impl Iterator<Item = (&T, f64)> {
+    pub fn top(&self, n: usize) -> impl Iterator<Item = (&O, f64)> {
         let mut ranked: Vec<_> = self.probabilities().collect();
 
         // a stable sort keeps equal options in the order of the question
@@ -251,7 +255,7 @@ impl<T> ChoiceAnswer<T> {
         self.confidence
     }
 
-    pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&T, f64)> {
+    pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&O, f64)> {
         self.question
             .options
             .iter()
@@ -260,7 +264,7 @@ impl<T> ChoiceAnswer<T> {
     }
 
     #[must_use]
-    pub fn into_probabilities(self) -> Vec<(T, f64)> {
+    pub fn into_probabilities(self) -> Vec<(O, f64)> {
         self.question
             .options
             .into_iter()
@@ -270,7 +274,7 @@ impl<T> ChoiceAnswer<T> {
     }
 }
 
-impl<T> Serialize for ChoiceAnswer<T> {
+impl<O> Serialize for ChoiceAnswer<O> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // the names, so a value needs no `Serialize`
         let names: Vec<_> = self.question.options.iter().map(|o| &o.name).collect();
@@ -285,10 +289,10 @@ impl<T> Serialize for ChoiceAnswer<T> {
 
 #[derive(Serialize)]
 #[serde(tag = "type", rename = "choice")]
-struct Question<'a, T> {
+struct Question<'a, O> {
     instructions: &'a RawValue,
     #[serde(serialize_with = "criteria")]
-    criteria: &'a [Entry<T>],
+    criteria: &'a [Entry<O>],
 }
 
 #[derive(Deserialize)]
@@ -301,7 +305,7 @@ enum Answer {
     },
 }
 
-impl<T> Sealed for Choice<T> {
+impl<O> Sealed for Choice<O> {
     fn write(&self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
         let criteria = self.options.as_slice();
@@ -344,7 +348,7 @@ impl<T> Sealed for Choice<T> {
 }
 
 // by hand, as a `serde_json::Map` would sort the options by name
-fn criteria<T, S: Serializer>(options: &&[Entry<T>], serializer: S) -> Result<S::Ok, S::Error> {
+fn criteria<O, S: Serializer>(options: &&[Entry<O>], serializer: S) -> Result<S::Ok, S::Error> {
     serializer.collect_map(options.iter().map(|o| (&o.name, &o.description)))
 }
 
@@ -356,13 +360,13 @@ mod tests {
     use serde_json::{Map, Value, json};
     use std::collections::BTreeMap;
 
-    fn serialized<T>(choice: &Choice<T>) -> String {
+    fn serialized<O>(choice: &Choice<O>) -> String {
         let mut raw_question_set = RawQuestionSet::default();
         choice.write(&mut raw_question_set);
         raw_question_set.texts()[0].to_owned()
     }
 
-    fn read<T>(choice: Choice<T>, answer: Value) -> Result<ChoiceAnswer<T>, String> {
+    fn read<O>(choice: Choice<O>, answer: Value) -> Result<ChoiceAnswer<O>, String> {
         choice.read(&mut RawAnswerSet::of(vec![answer]))
     }
 

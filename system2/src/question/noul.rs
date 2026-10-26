@@ -1,5 +1,5 @@
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
-use crate::{InvalidJson, QuestionSet, json};
+use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::{RawValue, to_raw_value};
@@ -39,6 +39,10 @@ impl Noul {
             instructions,
             criteria,
         })
+    }
+
+    pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
+        Tagged::new(self, tag)
     }
 }
 
