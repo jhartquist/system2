@@ -1,0 +1,16 @@
+error[E0277]: `String` is not a named answer set
+ --> tests/ui/questions_new_refuses_a_type_that_is_not_a_named_answer_set.rs:4:13
+  |
+4 |     let _ = Questions::<String>::new();
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ not a named answer set
+  |
+  = help: the trait `system2::NamedAnswerSet` is not implemented for `String`
+  = note: define the answers with `questions!(Name { … })`, then `Questions<Name>` asks them
+note: required by a bound in `Questions::<A>::new`
+ --> src/ask/questions.rs
+  |
+  |     pub const fn new() -> Self
+  |                  --- required by a bound in this associated function
+  |     where
+  |         A: NamedAnswerSet,
+  |            ^^^^^^^^^^^^^^ required by this bound in `Questions::<A>::new`
