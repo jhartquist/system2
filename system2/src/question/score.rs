@@ -1,4 +1,4 @@
-use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, check_range};
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -235,12 +235,19 @@ impl<L> Sealed for Score<L> {
             confidence,
             mut probabilities,
         } = raw_answer_set.next()?;
+        #[expect(clippy::cast_precision_loss, reason = "a Score has at most 10 levels")]
+        let last_position = (self.levels.len() - 1) as f64;
+        check_range("score", score, last_position)?;
+        check_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
         let probabilities = (0..self.levels.len())
             .map(|index| probabilities.remove(&index.to_string()))
             .collect::<Option<Vec<_>>>()
             .filter(|_| count == self.levels.len())
             .ok_or("must give a probability for each level of the Score, and no other")?;
+        for &probability in &probabilities {
+            check_range("probability", probability, 1.0)?;
+        }
 
         // of two equal probabilities, the lower level is the more likely
         let most_likely = (0..probabilities.len())
@@ -488,6 +495,28 @@ mod tests {
             (
                 answer(&json!({ "0": 0.2, "1": 0.4, "2": 0.2, "3": 0.2 })),
                 "must give a probability for each level of the Score, and no other",
+            ),
+            (
+                json!({
+                    "type": "score",
+                    "score": 2.5,
+                    "confidence": 0.4,
+                    "probabilities": { "0": 0.2, "1": 0.4, "2": 0.4 },
+                }),
+                "must give a score from 0 to 2, not 2.5",
+            ),
+            (
+                json!({
+                    "type": "score",
+                    "score": 1.3,
+                    "confidence": -0.4,
+                    "probabilities": { "0": 0.2, "1": 0.4, "2": 0.4 },
+                }),
+                "must give a confidence from 0 to 1, not -0.4",
+            ),
+            (
+                answer(&json!({ "2": -0.4, "1": 1.2, "0": 0.2 })),
+                "must give a probability from 0 to 1, not 1.2",
             ),
         ];
         for (json, message) in cases {

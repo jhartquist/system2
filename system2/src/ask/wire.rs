@@ -80,6 +80,21 @@ impl RawAnswerSet {
             .map_err(|error| format!("must answer each question: {error}"))
     }
 
+    pub(crate) fn into_answer_set<Q: QuestionSet>(
+        mut self,
+        question_set: Q,
+    ) -> Result<Q::AnswerSet, String> {
+        let answer_set = question_set.read(&mut self)?;
+
+        // the lowest, so the message is the same on each run
+        if let Some(extra_key) = self.answers.keys().min() {
+            return Err(format!(
+                "must answer only the questions of the request, not `{extra_key}`"
+            ));
+        }
+        Ok(answer_set)
+    }
+
     #[cfg(test)]
     pub(crate) fn of(answers: Vec<Value>) -> Self {
         let answers = answers
@@ -91,13 +106,22 @@ impl RawAnswerSet {
     }
 }
 
+pub(crate) fn check_range(name: &str, value: f64, max: f64) -> Result<(), String> {
+    if (0.0..=max).contains(&value) {
+        Ok(())
+    } else {
+        Err(format!("must give a {name} from 0 to {max}, not {value}"))
+    }
+}
+
 fn key(index: usize) -> String {
     format!("q{index}")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RawAnswerSet, RawQuestionSet, key};
+    use super::{RawAnswerSet, RawQuestionSet, check_range, key};
+    use crate::Noul;
     use serde_json::{Value, json};
     use std::collections::HashMap;
 
@@ -144,6 +168,46 @@ mod tests {
         assert_eq!(
             raw_answer_set.next::<u32>().unwrap_err(),
             r#"must answer each question: invalid type: string "first", expected u32"#
+        );
+    }
+
+    #[test]
+    fn into_answer_set_gives_the_answers_of_the_question_set() {
+        let raw_answer_set = RawAnswerSet::of(vec![json!({ "type": "noul", "noul": 0.92 })]);
+
+        let answer = raw_answer_set
+            .into_answer_set(Noul::new("Is it spam?").unwrap())
+            .unwrap();
+
+        assert_eq!(answer.probability(), 0.92);
+    }
+
+    #[test]
+    fn into_answer_set_refuses_an_answer_that_no_question_read() {
+        let answer = json!({ "type": "noul", "noul": 0.92 });
+        let raw_answer_set = RawAnswerSet::of(vec![answer.clone(), answer.clone(), answer]);
+
+        let error = raw_answer_set
+            .into_answer_set(Noul::new("Is it spam?").unwrap())
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            "must answer only the questions of the request, not `q1`"
+        );
+    }
+
+    #[test]
+    fn check_range_accepts_only_0_to_max() {
+        assert!(check_range("score", 0.0, 2.0).is_ok());
+        assert!(check_range("score", 2.0, 2.0).is_ok());
+        assert_eq!(
+            check_range("score", -0.01, 2.0).unwrap_err(),
+            "must give a score from 0 to 2, not -0.01"
+        );
+        assert_eq!(
+            check_range("score", 2.01, 2.0).unwrap_err(),
+            "must give a score from 0 to 2, not 2.01"
         );
     }
 }

@@ -1,4 +1,4 @@
-use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, check_range};
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -329,6 +329,7 @@ impl<O> Sealed for Choice<O> {
             .iter()
             .position(|o| o.name == choice)
             .ok_or_else(|| format!("must choose an option of the Choice, not `{choice}`"))?;
+        check_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
         let probabilities = self
             .options
@@ -337,6 +338,9 @@ impl<O> Sealed for Choice<O> {
             .collect::<Option<Vec<_>>>()
             .filter(|_| count == self.options.len())
             .ok_or("must give a probability for each option of the Choice, and no other")?;
+        for &probability in &probabilities {
+            check_range("probability", probability, 1.0)?;
+        }
         let question = self;
         Ok(ChoiceAnswer {
             question,
@@ -655,6 +659,19 @@ mod tests {
             (
                 answer("go", &json!({ "rust": 0.4, "go": 0.4, "java": 0.2 })),
                 "must give a probability for each option of the Choice, and no other",
+            ),
+            (
+                json!({
+                    "type": "choice",
+                    "choice": "go",
+                    "confidence": 1.2,
+                    "probabilities": { "rust": 0.5, "go": 0.5 },
+                }),
+                "must give a confidence from 0 to 1, not 1.2",
+            ),
+            (
+                answer("go", &json!({ "go": 1.1, "rust": -0.1 })),
+                "must give a probability from 0 to 1, not -0.1",
             ),
         ];
         for (json, message) in cases {

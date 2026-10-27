@@ -1,4 +1,4 @@
-use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, check_range};
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -144,6 +144,7 @@ impl Sealed for Noul {
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
         let Answer::Noul { noul: probability } = raw_answer_set.next()?;
+        check_range("probability", probability, 1.0)?;
         let question = self;
         Ok(NoulAnswer {
             question,
@@ -289,15 +290,25 @@ mod tests {
     }
 
     #[test]
-    fn read_refuses_another_type_of_answer() {
-        let noul = Noul::new("Is it spam?").unwrap();
-
-        let error = read(noul, json!({ "type": "box", "confidence": 0.9 })).unwrap_err();
-
-        assert_eq!(
-            error,
-            "must answer each question: unknown variant `box`, expected `noul`"
-        );
+    fn read_refuses_an_answer_that_does_not_fit() {
+        let cases = [
+            (
+                json!({ "type": "box", "confidence": 0.9 }),
+                "must answer each question: unknown variant `box`, expected `noul`",
+            ),
+            (
+                json!({ "type": "noul", "noul": -0.01 }),
+                "must give a probability from 0 to 1, not -0.01",
+            ),
+            (
+                json!({ "type": "noul", "noul": 1.01 }),
+                "must give a probability from 0 to 1, not 1.01",
+            ),
+        ];
+        for (json, message) in cases {
+            let noul = Noul::new("Is it spam?").unwrap();
+            assert_eq!(read(noul, json).unwrap_err(), message);
+        }
     }
 
     #[test]

@@ -132,21 +132,44 @@ async fn ask_refuses_a_bad_state_for_a_question_set_with_no_questions() {
 }
 
 #[tokio::test]
-async fn ask_reports_a_missing_answer() {
-    let response = answer_set_response(&[&noul_answer(0.92)])
-        .insert_header("x-typesafe-request-id", REQUEST_ID);
-    let server = mock_api(response).await;
+async fn ask_refuses_answers_that_do_not_fit_the_questions() {
+    let cases = [
+        (
+            vec![noul_answer(0.1)],
+            "must answer each question: `q1` has no answer",
+        ),
+        (
+            vec![noul_answer(0.1), noul_answer(0.2), noul_answer(0.3)],
+            "must answer only the questions of the request, not `q2`",
+        ),
+        (
+            vec![
+                noul_answer(0.1),
+                json!({
+                    "type": "choice",
+                    "choice": "go",
+                    "confidence": 0.7,
+                    "probabilities": { "rust": 0.3, "go": 0.7 },
+                }),
+            ],
+            "must answer each question: unknown variant `choice`, expected `noul`",
+        ),
+    ];
+    for (answers, message) in cases {
+        let answers: Vec<_> = answers.iter().collect();
+        let response =
+            answer_set_response(&answers).insert_header("x-typesafe-request-id", REQUEST_ID);
+        let server = mock_api(response).await;
 
-    let error = client_for(&server)
-        .ask((noul("Is it spam?"), noul("Is it urgent?")), STATE)
-        .await
-        .unwrap_err();
+        let error = client_for(&server)
+            .ask((noul("Is it spam?"), noul("Is it urgent?")), STATE)
+            .await
+            .unwrap_err();
 
-    assert!(matches!(error, AskError::InvalidResponse { .. }));
-    assert_eq!(
-        error.to_string(),
-        format!(
-            "the response must answer each question: `q1` has no answer (request ID `{REQUEST_ID}`)"
-        )
-    );
+        assert!(matches!(error, AskError::InvalidResponse { .. }));
+        assert_eq!(
+            error.to_string(),
+            format!("the response {message} (request ID `{REQUEST_ID}`)")
+        );
+    }
 }

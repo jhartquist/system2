@@ -39,20 +39,19 @@ impl<Q: QuestionSet> Future for AskFuture<Q> {
     )]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Response {
-            mut raw_answer_set,
+            raw_answer_set,
             request_id,
         } = ready!(self.request.as_mut().poll(cx))?;
         let question_set = self
             .question_set
             .take()
             .expect("the question set answers once");
-        let answer_set =
-            question_set
-                .read(&mut raw_answer_set)
-                .map_err(|message| AskError::InvalidResponse {
-                    message,
-                    request_id,
-                });
+        let answer_set = raw_answer_set
+            .into_answer_set(question_set)
+            .map_err(|message| AskError::InvalidResponse {
+                message,
+                request_id,
+            });
         Poll::Ready(answer_set)
     }
 }
