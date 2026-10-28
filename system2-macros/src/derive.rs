@@ -54,7 +54,8 @@ pub(crate) fn options(input: &DeriveInput) -> syn::Result<TokenStream> {
         } = entry;
         if !names.insert(name) {
             let message = format!(
-                r#"each option must have a different name, but two options have the name `{name}`: rename one with `#[system2(rename = "…")]`"#
+                "each option must have a different name, but two options have the name `{name}`: \
+                 rename one with `#[system2(rename = \"…\")]`"
             );
             return Err(syn::Error::new(*span, message));
         }
@@ -68,7 +69,11 @@ pub(crate) fn options(input: &DeriveInput) -> syn::Result<TokenStream> {
         };
 
         table.push(quote! {
-            ::system2::ChoiceOption { name: #name, description: #description, value: || Self::#variant }
+            ::system2::ChoiceOption {
+                name: #name,
+                description: #description,
+                value: || Self::#variant
+            }
         });
     }
 
@@ -107,7 +112,8 @@ pub(crate) fn levels(input: &DeriveInput) -> syn::Result<TokenStream> {
             // at least one level had a description, so they all should
             None if described => {
                 let message = format!(
-                    r#"the level `{variant}` must have a description, because other levels have one: add a doc comment or `#[system2(description = "…")]`"#
+                    "the level `{variant}` must have a description, because other levels have one: \
+                     add a doc comment or `#[system2(description = \"…\")]`"
                 );
                 return Err(syn::Error::new(variant.span(), message));
             }
@@ -118,7 +124,8 @@ pub(crate) fn levels(input: &DeriveInput) -> syn::Result<TokenStream> {
         if let Some(first) = texts.insert(level, variant) {
             let source = if described { "description" } else { "name" };
             let message = format!(
-                "each level must have a different {source}, but `{variant}` has the same {source} as `{first}`"
+                "each level must have a different {source}, \
+                 but `{variant}` has the same {source} as `{first}`"
             );
             return Err(syn::Error::new(variant.span(), message));
         }
@@ -190,7 +197,8 @@ fn entry<'a>(variant: &'a Variant, derive: &Derive) -> syn::Result<Entry<'a>> {
     // only accept unit variants
     if !matches!(variant.fields, Fields::Unit) {
         let message = format!(
-            "the variant `{ident}` must have no fields: use `{question}::with_values` for {items} that hold data"
+            "the variant `{ident}` must have no fields: \
+             use `{question}::with_values` for {items} that hold data"
         );
         return Err(syn::Error::new(ident.span(), message));
     }
@@ -293,7 +301,8 @@ fn doc_comment(attrs: &[Attribute]) -> syn::Result<Option<String>> {
             ..
         }) = &meta.value
         else {
-            let message = r#"the doc comment must be a string literal: give the description with `#[system2(description = "…")]`"#;
+            let message = "the doc comment must be a string literal: \
+                           give the description with `#[system2(description = \"…\")]`";
             return Err(syn::Error::new_spanned(attr, message));
         };
 
@@ -455,7 +464,8 @@ mod tests {
             ),
             (
                 quote! { enum Problem { Crash(u8) } },
-                "the variant `Crash` must have no fields: use `Choice::with_values` for options that hold data",
+                "the variant `Crash` must have no fields: \
+                 use `Choice::with_values` for options that hold data",
             ),
             (
                 quote! { enum Problem {} },
@@ -470,7 +480,13 @@ mod tests {
                 r#"an option takes only `rename = "…"` and `description = "…"`"#,
             ),
             (
-                quote! { enum Problem { #[system2(rename = "panic")] #[system2(rename = "crash")] Crash } },
+                quote! {
+                    enum Problem {
+                        #[system2(rename = "panic")]
+                        #[system2(rename = "crash")]
+                        Crash
+                    }
+                },
                 "`rename` must occur one time at most",
             ),
             (
@@ -482,12 +498,18 @@ mod tests {
                 "unexpected end of input, expected an expression",
             ),
             (
-                quote! { enum Problem { #[system2(description = json!({ "what": "A panic." }))] Crash } },
+                quote! {
+                    enum Problem {
+                        #[system2(description = json!({ "what": "A panic." }))]
+                        Crash
+                    }
+                },
                 "`description` must be a string literal",
             ),
             (
                 quote! { enum Problem { #[doc = include_str!("crash.md")] Crash } },
-                r#"the doc comment must be a string literal: give the description with `#[system2(description = "…")]`"#,
+                "the doc comment must be a string literal: \
+                 give the description with `#[system2(description = \"…\")]`",
             ),
             (
                 quote! { enum Problem { #[system2(rename = " ")] Crash } },
@@ -495,7 +517,8 @@ mod tests {
             ),
             (
                 quote! { enum Problem { HandOff, #[system2(rename = "hand_off")] Escalate } },
-                r#"each option must have a different name, but two options have the name `hand_off`: rename one with `#[system2(rename = "…")]`"#,
+                "each option must have a different name, but two options have the name `hand_off`: \
+                 rename one with `#[system2(rename = \"…\")]`",
             ),
         ];
         for (tokens, text) in cases {
@@ -523,7 +546,8 @@ mod tests {
             ),
             (
                 quote! { enum Severity { Minor { count: u8 } } },
-                "the variant `Minor` must have no fields: use `Score::with_values` for levels that hold data",
+                "the variant `Minor` must have no fields: \
+                 use `Score::with_values` for levels that hold data",
             ),
             (
                 quote! { enum Severity {} },
@@ -535,15 +559,30 @@ mod tests {
             ),
             (
                 quote! { enum Severity { /** Nothing breaks. */ Minor, Major } },
-                r#"the level `Major` must have a description, because other levels have one: add a doc comment or `#[system2(description = "…")]`"#,
+                "the level `Major` must have a description, because other levels have one: \
+                 add a doc comment or `#[system2(description = \"…\")]`",
             ),
             (
-                quote! { enum Severity { /** Nothing breaks. */ #[system2(description = " ")] Minor } },
+                quote! {
+                    enum Severity {
+                        /** Nothing breaks. */
+                        #[system2(description = " ")]
+                        Minor
+                    }
+                },
                 "the description of a level must not be empty",
             ),
             (
-                quote! { enum Severity { /** Bad. */ Minor, #[system2(description = "Bad.")] Major } },
-                "each level must have a different description, but `Major` has the same description as `Minor`",
+                quote! {
+                    enum Severity {
+                        /** Bad. */
+                        Minor,
+                        #[system2(description = "Bad.")]
+                        Major
+                    }
+                },
+                "each level must have a different description, \
+                 but `Major` has the same description as `Minor`",
             ),
             (
                 quote! { enum Severity { AB, A_b } },

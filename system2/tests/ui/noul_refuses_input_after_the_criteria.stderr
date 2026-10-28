@@ -1,0 +1,5 @@
+error: `noul!` takes the instructions, then the criteria, and nothing more
+ --> tests/ui/noul_refuses_input_after_the_criteria.rs:4:59
+  |
+4 |     let _ = noul!("Is it spam?", { "true": "It sells." }, "It links out.");
+  |                                                           ^^^^^^^^^^^^^^^

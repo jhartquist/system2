@@ -1,9 +1,19 @@
 //! The macros of `system2`.
 
 mod derive;
+mod json;
+mod noul;
+mod part;
 
 use proc_macro::TokenStream;
+use quote::ToTokens;
 use syn::{DeriveInput, parse_macro_input};
+
+#[proc_macro]
+pub fn noul(input: TokenStream) -> TokenStream {
+    let noul = parse_macro_input!(input as noul::Noul);
+    noul.into_token_stream().into()
+}
 
 #[proc_macro_derive(Options, attributes(system2))]
 pub fn derive_options(input: TokenStream) -> TokenStream {

@@ -161,7 +161,8 @@ async fn ask_reports_an_answer_with_an_unknown_option() {
     assert_eq!(
         error.to_string(),
         format!(
-            "the response must choose an option of the Choice, not `src/main.rs` (request ID `{REQUEST_ID}`)"
+            "the response must choose an option of the Choice, not `src/main.rs` \
+             (request ID `{REQUEST_ID}`)"
         )
     );
     let AskError::InvalidResponse { request_id, .. } = error else {

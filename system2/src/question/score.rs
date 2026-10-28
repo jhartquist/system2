@@ -1,4 +1,4 @@
-use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, check_range};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -48,7 +48,7 @@ impl<L> Score<L> {
         let levels = levels
             .into_iter()
             .map(|level| (json::validate(&level), level));
-        Self::checked(instructions, levels)
+        Self::validated(instructions, levels)
     }
 
     pub fn with_values<D: Serialize>(
@@ -59,7 +59,7 @@ impl<L> Score<L> {
         let levels = values
             .into_iter()
             .map(|value| (json::validate(level(&value)), value));
-        Self::checked(instructions, levels)
+        Self::validated(instructions, levels)
     }
 
     pub fn of(instructions: impl Serialize) -> Result<Self, InvalidScore>
@@ -69,14 +69,14 @@ impl<L> Score<L> {
         let levels = L::LEVELS
             .iter()
             .map(|level| (json::validate(level.level), (level.value)()));
-        Self::checked(instructions, levels)
+        Self::validated(instructions, levels)
     }
 
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
 
-    fn checked(
+    fn validated(
         instructions: impl Serialize,
         levels: impl IntoIterator<Item = (Result<Box<RawValue>, InvalidJson>, L)>,
     ) -> Result<Self, InvalidScore> {
@@ -237,8 +237,8 @@ impl<L> Sealed for Score<L> {
         } = raw_answer_set.next()?;
         #[expect(clippy::cast_precision_loss, reason = "a Score has at most 10 levels")]
         let last_position = (self.levels.len() - 1) as f64;
-        check_range("score", score, last_position)?;
-        check_range("confidence", confidence, 1.0)?;
+        validate_range("score", score, last_position)?;
+        validate_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
         let probabilities = (0..self.levels.len())
             .map(|index| probabilities.remove(&index.to_string()))
@@ -246,7 +246,7 @@ impl<L> Sealed for Score<L> {
             .filter(|_| count == self.levels.len())
             .ok_or("must give a probability for each level of the Score, and no other")?;
         for &probability in &probabilities {
-            check_range("probability", probability, 1.0)?;
+            validate_range("probability", probability, 1.0)?;
         }
 
         // of two equal probabilities, the lower level is the more likely
@@ -300,7 +300,7 @@ mod tests {
         })
     }
 
-    // one type of level, so coverage sees each check of `checked` and its success together
+    // one type of level, so coverage sees each failure of `validated` and its success together
     fn numbered(count: usize) -> Vec<Value> {
         (0..count).map(|i| json!(format!("Level {i}."))).collect()
     }

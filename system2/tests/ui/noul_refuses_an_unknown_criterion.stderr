@@ -1,0 +1,11 @@
+error: each key of the criteria must be "true" or "false"
+ --> tests/ui/noul_refuses_an_unknown_criterion.rs:4:36
+  |
+4 |     let _ = noul!("Is it spam?", { "maybe": "It links out." });
+  |                                    ^^^^^^^
+
+error: each key of the criteria must be "true" or "false"
+ --> tests/ui/noul_refuses_an_unknown_criterion.rs:5:36
+  |
+5 |     let _ = noul!("Is it spam?", { true: "It sells a product." });
+  |                                    ^^^^

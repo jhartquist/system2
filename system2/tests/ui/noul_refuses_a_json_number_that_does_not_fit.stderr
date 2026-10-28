@@ -1,0 +1,5 @@
+error: a JSON number must fit in an `f64`
+ --> tests/ui/noul_refuses_a_json_number_that_does_not_fit.rs:4:72
+  |
+4 |     let _ = noul!({ "question": "Is this number too large?", "number": 1e400 });
+  |                                                                        ^^^^^

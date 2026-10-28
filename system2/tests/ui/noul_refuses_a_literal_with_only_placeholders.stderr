@@ -1,0 +1,11 @@
+error: the instructions must have text outside the placeholders: for text from data, use `Noul::new`
+ --> tests/ui/noul_refuses_a_literal_with_only_placeholders.rs:5:19
+  |
+5 |     let _ = noul!(" {text} ");
+  |                   ^^^^^^^^^^
+
+error: the instructions must have text outside the placeholders: for text from data, use `Noul::new`
+ --> tests/ui/noul_refuses_a_literal_with_only_placeholders.rs:6:19
+  |
+6 |     let _ = noul!("{text:}>0}");
+  |                   ^^^^^^^^^^^^

@@ -180,7 +180,8 @@ async fn ask_reports_a_failed_connection() {
     assert_eq!(
         error.to_string(),
         format!(
-            "the connection to the API failed: error sending request for url ({closed}/v1/systemone)"
+            "the connection to the API failed: \
+             error sending request for url ({closed}/v1/systemone)"
         )
     );
 }
@@ -203,7 +204,8 @@ async fn ask_reports_an_error_status() {
     assert_eq!(
         error.to_string(),
         format!(
-            "the API refused the request with status 400: Unknown model: jev-1.14 (request ID `{REQUEST_ID}`)"
+            "the API refused the request with status 400: \
+             Unknown model: jev-1.14 (request ID `{REQUEST_ID}`)"
         )
     );
     let AskError::Http {
@@ -248,7 +250,8 @@ async fn ask_reports_an_invalid_response() {
     assert_eq!(
         error.to_string(),
         format!(
-            "the response must be JSON: expected value at line 1 column 1 (request ID `{REQUEST_ID}`)"
+            "the response must be JSON: \
+             expected value at line 1 column 1 (request ID `{REQUEST_ID}`)"
         )
     );
     let AskError::InvalidResponse { request_id, .. } = error else {

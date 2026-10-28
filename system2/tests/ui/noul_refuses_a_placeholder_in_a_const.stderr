@@ -1,0 +1,22 @@
+error[E0015]: cannot call non-const formatting macro in constants
+ --> tests/ui/noul_refuses_a_placeholder_in_a_const.rs:5:22
+  |
+5 | const TESTED: Noul = noul!("Is `{NAME}` tested?");
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: calls in constants are limited to constant functions, tuple structs and tuple variants
+  = note: this error originates in the macro `::std::format` which comes from the expansion of the macro `noul` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0015]: cannot call non-const function `format` in constants
+ --> tests/ui/noul_refuses_a_placeholder_in_a_const.rs:5:22
+  |
+5 | const TESTED: Noul = noul!("Is `{NAME}` tested?");
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+note: function `format` is not const
+ --> $RUST/alloc/src/fmt.rs
+  |
+  | pub fn format(args: Arguments<'_>) -> string::String {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: calls in constants are limited to constant functions, tuple structs and tuple variants
+  = note: this error originates in the macro `::std::format` which comes from the expansion of the macro `noul` (in Nightly builds, run with -Z macro-backtrace for more info)

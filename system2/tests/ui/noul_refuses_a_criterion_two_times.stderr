@@ -1,0 +1,5 @@
+error: the key `true` must occur one time at most
+ --> tests/ui/noul_refuses_a_criterion_two_times.rs:4:57
+  |
+4 |     let _ = noul!("Is it spam?", { "true": "It sells.", "true": "It links out." });
+  |                                                         ^^^^^^

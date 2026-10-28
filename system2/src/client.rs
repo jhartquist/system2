@@ -129,7 +129,7 @@ impl Client {
 
     #[expect(
         clippy::expect_used,
-        reason = "each part is checked json or text, with text keys"
+        reason = "each part is validated json or text, with text keys"
     )]
     fn request_body(&self, raw_question_set: &RawQuestionSet, state: &RawValue) -> Vec<u8> {
         let model = &self.model;

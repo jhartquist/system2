@@ -1,0 +1,5 @@
+error: the `false` criterion must not be empty
+ --> tests/ui/noul_refuses_an_empty_criterion.rs:4:45
+  |
+4 |     let _ = noul!("Is it spam?", { "false": "" });
+  |                                             ^^

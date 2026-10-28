@@ -1,4 +1,5 @@
-use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, check_range};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
+use crate::json::Json;
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -7,22 +8,26 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Noul {
-    instructions: Box<RawValue>,
-    criteria: Option<Criteria>,
+    instructions: Json,
+    criteria: Criteria,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct Criteria {
     #[serde(skip_serializing_if = "Option::is_none")]
-    r#true: Option<Box<RawValue>>,
+    r#true: Option<Json>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    r#false: Option<Box<RawValue>>,
+    r#false: Option<Json>,
 }
 
 impl Noul {
     pub fn new(instructions: impl Serialize) -> Result<Self, InvalidNoul> {
         let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
-        let criteria = None;
+        let instructions = Json::from(instructions);
+        let criteria = Criteria {
+            r#true: None,
+            r#false: None,
+        };
         Ok(Noul {
             instructions,
             criteria,
@@ -34,7 +39,8 @@ impl Noul {
         criteria: impl Serialize,
     ) -> Result<Self, InvalidNoul> {
         let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
-        let criteria = Some(Criteria::new(criteria)?);
+        let instructions = Json::from(instructions);
+        let criteria = Criteria::new(criteria)?;
         Ok(Noul {
             instructions,
             criteria,
@@ -43,6 +49,16 @@ impl Noul {
 
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
+    }
+}
+
+#[doc(hidden)]
+#[must_use]
+pub const fn noul(instructions: Json, r#true: Option<Json>, r#false: Option<Json>) -> Noul {
+    let criteria = Criteria { r#true, r#false };
+    Noul {
+        instructions,
+        criteria,
     }
 }
 
@@ -56,9 +72,13 @@ impl Criteria {
             })
             .ok_or(InvalidNoul::Criteria)?;
         let mut take = |key| fields.remove(key).map(json::validate).transpose();
-        let r#true = take("true").map_err(InvalidNoul::True)?;
-        let r#false = take("false").map_err(InvalidNoul::False)?;
+        let r#true = take("true").map_err(InvalidNoul::True)?.map(Json::from);
+        let r#false = take("false").map_err(InvalidNoul::False)?.map(Json::from);
         Ok(Criteria { r#true, r#false })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.r#true.is_none() && self.r#false.is_none()
     }
 }
 
@@ -118,7 +138,7 @@ impl Serialize for NoulAnswer {
 #[derive(Serialize)]
 #[serde(tag = "type", rename = "noul")]
 struct Question<'a> {
-    instructions: &'a RawValue,
+    instructions: &'a Json,
     #[serde(skip_serializing_if = "Option::is_none")]
     criteria: Option<&'a Criteria>,
 }
@@ -132,7 +152,11 @@ enum Answer {
 impl Sealed for Noul {
     fn write(&self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
-        let criteria = self.criteria.as_ref();
+        let criteria = if self.criteria.is_empty() {
+            None
+        } else {
+            Some(&self.criteria)
+        };
         raw_question_set.push(&Question {
             instructions,
             criteria,
@@ -144,7 +168,7 @@ impl Sealed for Noul {
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
         let Answer::Noul { noul: probability } = raw_answer_set.next()?;
-        check_range("probability", probability, 1.0)?;
+        validate_range("probability", probability, 1.0)?;
         let question = self;
         Ok(NoulAnswer {
             question,
@@ -282,10 +306,10 @@ mod tests {
         let answer = read(noul, json!({ "type": "noul", "noul": 0.92 })).unwrap();
 
         assert_eq!(answer.probability(), 0.92);
-        assert_eq!(answer.question().instructions.get(), r#""Is it spam?""#);
+        assert_eq!(serialized(answer.question())["instructions"], "Is it spam?");
         assert_eq!(
-            answer.into_question().instructions.get(),
-            r#""Is it spam?""#
+            serialized(&answer.into_question())["instructions"],
+            "Is it spam?"
         );
     }
 

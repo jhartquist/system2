@@ -23,7 +23,7 @@ pub struct RawQuestionSet {
 }
 
 impl RawQuestionSet {
-    #[expect(clippy::expect_used, reason = "a question holds only checked json")]
+    #[expect(clippy::expect_used, reason = "a question holds only validated json")]
     pub(crate) fn push(&mut self, question: &impl Serialize) {
         let question = to_raw_value(question).expect("a question serializes");
         self.questions.push(question);
@@ -106,7 +106,7 @@ impl RawAnswerSet {
     }
 }
 
-pub(crate) fn check_range(name: &str, value: f64, max: f64) -> Result<(), String> {
+pub(crate) fn validate_range(name: &str, value: f64, max: f64) -> Result<(), String> {
     if (0.0..=max).contains(&value) {
         Ok(())
     } else {
@@ -120,7 +120,7 @@ fn key(index: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{RawAnswerSet, RawQuestionSet, check_range, key};
+    use super::{RawAnswerSet, RawQuestionSet, key, validate_range};
     use crate::Noul;
     use serde_json::{Value, json};
     use std::collections::HashMap;
@@ -198,15 +198,15 @@ mod tests {
     }
 
     #[test]
-    fn check_range_accepts_only_0_to_max() {
-        assert!(check_range("score", 0.0, 2.0).is_ok());
-        assert!(check_range("score", 2.0, 2.0).is_ok());
+    fn validate_range_accepts_only_0_to_max() {
+        assert!(validate_range("score", 0.0, 2.0).is_ok());
+        assert!(validate_range("score", 2.0, 2.0).is_ok());
         assert_eq!(
-            check_range("score", -0.01, 2.0).unwrap_err(),
+            validate_range("score", -0.01, 2.0).unwrap_err(),
             "must give a score from 0 to 2, not -0.01"
         );
         assert_eq!(
-            check_range("score", 2.01, 2.0).unwrap_err(),
+            validate_range("score", 2.01, 2.0).unwrap_err(),
             "must give a score from 0 to 2, not 2.01"
         );
     }

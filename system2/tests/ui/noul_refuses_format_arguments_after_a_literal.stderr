@@ -1,0 +1,5 @@
+error: the criteria must be an object with the key `true`, the key `false`, or both: to fill in the instructions, name each value in a placeholder, as in `{name}`
+ --> tests/ui/noul_refuses_format_arguments_after_a_literal.rs:5:38
+  |
+5 |     let _ = noul!("Is `{}` tested?", name);
+  |                                      ^^^^

@@ -1,0 +1,5 @@
+error: a JSON number must have no suffix, such as `u32`
+ --> tests/ui/noul_refuses_a_json_number_with_a_suffix.rs:4:65
+  |
+4 |     let _ = noul!({ "question": "Is this line tested?", "line": 10u32 });
+  |                                                                 ^^^^^

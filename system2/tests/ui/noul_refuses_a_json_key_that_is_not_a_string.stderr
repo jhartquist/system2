@@ -1,0 +1,5 @@
+error: a key of a JSON object must be a string literal
+ --> tests/ui/noul_refuses_a_json_key_that_is_not_a_string.rs:4:21
+  |
+4 |     let _ = noul!({ question: "Is it spam?" });
+  |                     ^^^^^^^^

@@ -1,0 +1,5 @@
+error: the instructions must be a literal, not `format!`: a literal is a format string, as in `"Is {name} tested?"`
+ --> tests/ui/noul_refuses_format_in_place_of_a_literal.rs:5:19
+  |
+5 |     let _ = noul!(format!("Is `{name}` tested?"));
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

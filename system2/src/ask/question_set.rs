@@ -6,7 +6,8 @@ use std::array;
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a question set",
     label = "not a question set",
-    note = "a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets",
+    note = "a question set is a question, a `questions!` set, \
+            or a tuple, array, `Vec`, or `Option` of question sets",
     note = "to ask a question again, clone it; a reference to a question is not a question set"
 )]
 pub trait QuestionSet: Sized + Sealed {

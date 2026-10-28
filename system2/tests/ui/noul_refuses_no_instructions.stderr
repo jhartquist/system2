@@ -1,0 +1,7 @@
+error: `noul!` takes the instructions: a string literal, a constant, or a JSON literal
+ --> tests/ui/noul_refuses_no_instructions.rs:4:13
+  |
+4 |     let _ = noul!();
+  |             ^^^^^^^
+  |
+  = note: this error originates in the macro `noul` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,4 +1,4 @@
-use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, check_range};
+use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -118,7 +118,7 @@ impl<O> Choice<O> {
                 Entry::new(name, description, value)
             })
             .collect::<Result<_, _>>()?;
-        Self::checked(instructions, options)
+        Self::validated(instructions, options)
     }
 
     pub fn with_values<L: Label>(
@@ -134,7 +134,7 @@ impl<O> Choice<O> {
                 Entry::new(label.name(), label.description(), value)
             })
             .collect::<Result<_, _>>()?;
-        Self::checked(instructions, options)
+        Self::validated(instructions, options)
     }
 
     pub fn of(instructions: impl Serialize) -> Result<Self, InvalidChoice>
@@ -149,14 +149,17 @@ impl<O> Choice<O> {
                 Entry::new(option.name.to_owned(), description, (option.value)())
             })
             .collect::<Result<_, _>>()?;
-        Self::checked(instructions, options)
+        Self::validated(instructions, options)
     }
 
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
 
-    fn checked(instructions: Box<RawValue>, options: Vec<Entry<O>>) -> Result<Self, InvalidChoice> {
+    fn validated(
+        instructions: Box<RawValue>,
+        options: Vec<Entry<O>>,
+    ) -> Result<Self, InvalidChoice> {
         if !(1..=MAX_OPTIONS).contains(&options.len()) {
             return Err(InvalidChoice::Count(options.len()));
         }
@@ -329,7 +332,7 @@ impl<O> Sealed for Choice<O> {
             .iter()
             .position(|o| o.name == choice)
             .ok_or_else(|| format!("must choose an option of the Choice, not `{choice}`"))?;
-        check_range("confidence", confidence, 1.0)?;
+        validate_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
         let probabilities = self
             .options
@@ -339,7 +342,7 @@ impl<O> Sealed for Choice<O> {
             .filter(|_| count == self.options.len())
             .ok_or("must give a probability for each option of the Choice, and no other")?;
         for &probability in &probabilities {
-            check_range("probability", probability, 1.0)?;
+            validate_range("probability", probability, 1.0)?;
         }
         let question = self;
         Ok(ChoiceAnswer {
@@ -383,7 +386,7 @@ mod tests {
         })
     }
 
-    // one type of option, so coverage sees each check of `checked` and its success together
+    // one type of option, so coverage sees each failure of `validated` and its success together
     fn numbered(count: usize) -> Vec<(String, Value)> {
         (0..count).map(|i| (format!("o{i}"), json!(null))).collect()
     }

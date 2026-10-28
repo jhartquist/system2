@@ -1,6 +1,6 @@
 mod choice;
 mod error;
-mod noul;
+pub(crate) mod noul;
 mod score;
 
 pub use choice::{Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, Label, Options};

@@ -1,7 +1,9 @@
 #![allow(dead_code, reason = "each test file uses some of the helpers")]
 #![allow(clippy::unwrap_used, reason = "test helpers can unwrap")]
 
+use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 use system2::{Client, Noul};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -76,4 +78,15 @@ pub(crate) fn request_body(request: &Request) -> Value {
 pub(crate) fn request_text(request: &Request) -> String {
     let body = zstd::decode_all(request.body.as_slice()).unwrap();
     String::from_utf8(body).unwrap()
+}
+
+pub(crate) fn question_texts(request: &Request) -> Vec<String> {
+    #[derive(serde::Deserialize)]
+    struct Body {
+        questions: HashMap<String, Box<RawValue>>,
+    }
+    let body: Body = serde_json::from_str(&request_text(request)).unwrap();
+    (0..body.questions.len())
+        .map(|index| body.questions[&format!("q{index}")].get().to_owned())
+        .collect()
 }

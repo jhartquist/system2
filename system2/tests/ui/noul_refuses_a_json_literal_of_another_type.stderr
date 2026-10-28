@@ -1,0 +1,5 @@
+error: a JSON value must be text, a number, `true`, `false`, `null`, an object, an array, or a variable
+ --> tests/ui/noul_refuses_a_json_literal_of_another_type.rs:4:64
+  |
+4 |     let _ = noul!({ "question": "Is this the grade?", "grade": 'A' });
+  |                                                                ^^^
