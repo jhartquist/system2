@@ -1,4 +1,4 @@
-use crate::part::Part;
+use crate::part::{Part, optional};
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote};
 use syn::parse::{Parse, ParseStream};
@@ -83,14 +83,6 @@ impl ToTokens for Noul {
         tokens.extend(quote! {
             ::system2::__private::noul(#instructions, #true_criterion, #false_criterion)
         });
-    }
-}
-
-fn optional(part: Option<&Part>) -> TokenStream {
-    if let Some(part) = part {
-        quote!(::core::option::Option::Some(#part))
-    } else {
-        quote!(::core::option::Option::None)
     }
 }
 

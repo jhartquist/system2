@@ -1,10 +1,9 @@
 use super::wire::{RawAnswerSet, RawQuestionSet, Sealed};
 use crate::QuestionSet;
-use std::marker::PhantomData;
 use std::{any, fmt};
 
-pub struct Questions<A> {
-    answer_set: PhantomData<fn() -> A>,
+pub struct Questions<A: NamedAnswerSet> {
+    question_set: Option<A::QuestionSet>,
 }
 
 #[doc(hidden)]
@@ -14,21 +13,18 @@ pub struct Questions<A> {
     note = "define the answers with `questions!(Name {{ … }})`, then `Questions<Name>` asks them"
 )]
 pub trait NamedAnswerSet: Sized {
+    type QuestionSet: QuestionSet<AnswerSet = Self::AnswerSet>;
     type AnswerSet;
 
-    fn question_set() -> impl QuestionSet<AnswerSet = Self::AnswerSet>;
+    fn question_set() -> Self::QuestionSet;
 
     fn from_answer_set(answer_set: Self::AnswerSet) -> Self;
 }
 
-impl<A> Questions<A> {
+impl<A: NamedAnswerSet> Questions<A> {
     #[must_use]
-    pub const fn new() -> Self
-    where
-        A: NamedAnswerSet,
-    {
-        let answer_set = PhantomData;
-        Questions { answer_set }
+    pub const fn new() -> Self {
+        Questions { question_set: None }
     }
 }
 
@@ -37,15 +33,18 @@ impl<A: NamedAnswerSet> QuestionSet for Questions<A> {
 }
 
 impl<A: NamedAnswerSet> Sealed for Questions<A> {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
-        A::question_set().write(raw_question_set);
+    // the set keeps the questions that it sends, so their values go to the answer
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
+        let question_set = self.question_set.insert(A::question_set());
+        question_set.write(raw_question_set);
     }
 
     fn read(
         self,
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
-        let answer_set = A::question_set().read(raw_answer_set)?;
+        let question_set = self.question_set.unwrap_or_else(A::question_set);
+        let answer_set = question_set.read(raw_answer_set)?;
         Ok(A::from_answer_set(answer_set))
     }
 }
@@ -56,14 +55,14 @@ impl<A: NamedAnswerSet> Default for Questions<A> {
     }
 }
 
-impl<A> Clone for Questions<A> {
+// a clone makes its questions again when it is asked, so the questions need no `Clone`
+impl<A: NamedAnswerSet> Clone for Questions<A> {
     fn clone(&self) -> Self {
-        let answer_set = PhantomData;
-        Questions { answer_set }
+        Questions::new()
     }
 }
 
-impl<A> fmt::Debug for Questions<A> {
+impl<A: NamedAnswerSet> fmt::Debug for Questions<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Questions<{}>", any::type_name::<A>())
     }
@@ -88,9 +87,10 @@ mod tests {
     }
 
     impl NamedAnswerSet for Review {
+        type QuestionSet = (Noul, Option<Noul>);
         type AnswerSet = (NoulAnswer, Option<NoulAnswer>);
 
-        fn question_set() -> impl QuestionSet<AnswerSet = Self::AnswerSet> {
+        fn question_set() -> Self::QuestionSet {
             (noul("Is it buggy?"), Some(noul("Is it tested?")))
         }
 
@@ -99,7 +99,7 @@ mod tests {
         }
     }
 
-    fn texts(question_set: &impl QuestionSet) -> Vec<String> {
+    fn texts(mut question_set: impl QuestionSet) -> Vec<String> {
         let mut raw_question_set = RawQuestionSet::default();
         question_set.write(&mut raw_question_set);
         raw_question_set
@@ -112,8 +112,8 @@ mod tests {
     #[test]
     fn write_gives_the_questions_of_the_named_answer_set() {
         assert_eq!(
-            texts(&Questions::<Review>::new()),
-            texts(&Review::question_set())
+            texts(Questions::<Review>::new()),
+            texts(Review::question_set())
         );
     }
 
@@ -146,8 +146,8 @@ mod tests {
     #[test]
     fn default_gives_the_questions_of_new() {
         assert_eq!(
-            texts(&Questions::<Review>::default()),
-            texts(&Questions::<Review>::new())
+            texts(Questions::<Review>::default()),
+            texts(Questions::<Review>::new())
         );
     }
 

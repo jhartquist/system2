@@ -1,0 +1,5 @@
+error: a description needs a third item in the tuple: use `(name, description, value)`
+ --> tests/ui/choice_refuses_a_description_in_a_tuple_of_two.rs:5:47
+  |
+5 |     let _ = choice!("Which check?", [("test", { "rule": rule })]);
+  |                                               ^^^^^^^^^^^^^^^^

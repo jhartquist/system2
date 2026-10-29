@@ -1,0 +1,8 @@
+error[E0277]: `String` must derive `Levels` to give the levels of a Score
+ --> tests/ui/score_refuses_a_type_without_levels.rs:4:32
+  |
+4 |     let _ = score!("How big?", String);
+  |                                ^^^^^^ does not derive `Levels`
+  |
+  = help: the trait `Levels` is not implemented for `String`
+  = note: add `#[derive(Levels)]` to an enum, or use `Score::with_values` for other types

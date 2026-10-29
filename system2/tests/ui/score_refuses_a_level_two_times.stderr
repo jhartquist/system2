@@ -1,0 +1,5 @@
+error: each level must be different, but the levels at index 0 and 2 are the same
+ --> tests/ui/score_refuses_a_level_two_times.rs:4:57
+  |
+4 |     let _ = score!("How big?", ["A line.", "A module.", "A line."]);
+  |                                                         ^^^^^^^^^

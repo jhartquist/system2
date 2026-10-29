@@ -1,0 +1,5 @@
+error: each `}` in text must be written two times, as `}}`
+ --> tests/ui/choice_refuses_an_unmatched_brace_in_a_name.rs:4:46
+  |
+4 |     let _ = choice!("Which block?", ["{{}}", "}"]);
+  |                                              ^^^

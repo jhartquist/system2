@@ -1,0 +1,5 @@
+error: the name of an option must be a string literal
+ --> tests/ui/choice_refuses_a_name_that_is_not_a_literal.rs:4:42
+  |
+4 |     let _ = choice!("Which language?", [(rust, 1)]);
+  |                                          ^^^^

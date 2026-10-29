@@ -1,0 +1,7 @@
+error[E0573]: cannot find type `teams` in this scope
+ --> tests/ui/choice_refuses_options_from_data.rs:5:53
+  |
+5 |     let _ = choice!("Which team owns this ticket?", teams);
+  |                                                     ^^^^^ not found in this scope
+  |
+  = note: a local variable named `teams` exists in another namespace

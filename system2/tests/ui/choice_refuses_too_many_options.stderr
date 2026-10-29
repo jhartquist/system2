@@ -1,0 +1,5 @@
+error: a Choice must have 1 to 255 options, not 256
+   --> tests/ui/choice_refuses_too_many_options.rs:262:13
+    |
+262 |             "o255",
+    |             ^^^^^^

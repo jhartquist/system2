@@ -1,0 +1,5 @@
+error: `score!` takes the instructions, then the levels, and nothing more
+ --> tests/ui/score_refuses_input_after_the_levels.rs:4:45
+  |
+4 |     let _ = score!("How big?", ["A line."], ["A module."]);
+  |                                             ^

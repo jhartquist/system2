@@ -1,21 +1,27 @@
+use super::table::Table;
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
+use crate::json::Json;
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 const MAX_LEVELS: usize = 10;
 
 #[derive(Debug, Clone)]
 pub struct Score<L> {
-    instructions: Box<RawValue>,
-    levels: Vec<Entry<L>>,
+    instructions: Json,
+    levels: Table<MacroLevel<L>, Entry<L>>,
 }
+
+// a level as a macro writes it: the text of the level, and the value
+type MacroLevel<L> = (&'static str, L);
 
 #[derive(Debug, Clone)]
 struct Entry<L> {
-    level: Box<RawValue>,
+    level: Json,
     value: L,
 }
 
@@ -28,6 +34,10 @@ pub trait Levels: Sized + 'static {
     // only the derive writes the table, so its shape can change
     #[doc(hidden)]
     const LEVELS: &'static [ScoreLevel<Self>];
+
+    // `score!` names the type in a path to this, where rustc refuses a variable as not a type
+    #[doc(hidden)]
+    const MACRO_LEVELS: fn() -> Vec<MacroLevel<Self>> = levels_of::<Self>;
 }
 
 #[doc(hidden)]
@@ -85,7 +95,7 @@ impl<L> Score<L> {
             .into_iter()
             .enumerate()
             .map(|(index, (level, value))| match level {
-                Ok(level) => Ok(Entry { level, value }),
+                Ok(level) => Ok((level, value)),
                 Err(error) => Err(InvalidScore::Level { index, error }),
             })
             .collect::<Result<_, _>>()?;
@@ -93,15 +103,49 @@ impl<L> Score<L> {
             return Err(InvalidScore::Count(levels.len()));
         }
         let mut indexes = HashMap::new();
-        for (second, entry) in levels.iter().enumerate() {
-            if let Some(first) = indexes.insert(entry.level.get(), second) {
+        for (second, (level, _)) in levels.iter().enumerate() {
+            if let Some(first) = indexes.insert(level.get(), second) {
                 return Err(InvalidScore::Duplicate { first, second });
             }
         }
+        let instructions = Json::from(instructions);
+        let levels = levels
+            .into_iter()
+            .map(|(level, value)| Entry {
+                level: Json::from(level),
+                value,
+            })
+            .collect();
+        let levels = Table::Owned(levels);
         Ok(Score {
             instructions,
             levels,
         })
+    }
+}
+
+#[doc(hidden)]
+#[must_use]
+pub const fn score<L>(instructions: Json, levels: fn() -> Vec<MacroLevel<L>>) -> Score<L> {
+    let levels = Table::Deferred(levels);
+    Score {
+        instructions,
+        levels,
+    }
+}
+
+// the derive has validated the table, so only `of` validates it again
+fn levels_of<L: Levels>() -> Vec<MacroLevel<L>> {
+    L::LEVELS
+        .iter()
+        .map(|level| (level.level, (level.value)()))
+        .collect()
+}
+
+impl<L> From<MacroLevel<L>> for Entry<L> {
+    fn from((level, value): MacroLevel<L>) -> Self {
+        let level = Json::String(Cow::Borrowed(level));
+        Entry { level, value }
     }
 }
 
@@ -151,12 +195,12 @@ impl<L> ScoreAnswer<L> {
 
     #[must_use]
     pub fn most_likely(&self) -> &L {
-        &self.question.levels[self.most_likely].value
+        &self.question.levels.as_entries()[self.most_likely].value
     }
 
     #[must_use]
     pub fn into_most_likely(self) -> L {
-        let mut levels = self.question.levels;
+        let mut levels = self.question.levels.into_entries();
         levels.swap_remove(self.most_likely).value
     }
 
@@ -168,6 +212,7 @@ impl<L> ScoreAnswer<L> {
     pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&L, f64)> {
         self.question
             .levels
+            .as_entries()
             .iter()
             .zip(&self.probabilities)
             .map(|(level, &probability)| (&level.value, probability))
@@ -177,6 +222,7 @@ impl<L> ScoreAnswer<L> {
     pub fn into_probabilities(self) -> Vec<(L, f64)> {
         self.question
             .levels
+            .into_entries()
             .into_iter()
             .zip(self.probabilities)
             .map(|(level, probability)| (level.value, probability))
@@ -187,7 +233,8 @@ impl<L> ScoreAnswer<L> {
 impl<L> Serialize for ScoreAnswer<L> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // the levels as sent, so a value needs no `Serialize`
-        let levels: Vec<_> = self.question.levels.iter().map(|l| &l.level).collect();
+        let levels = self.question.levels.as_entries();
+        let levels: Vec<_> = levels.iter().map(|l| &l.level).collect();
         let mut answer = serializer.serialize_struct("ScoreAnswer", 5)?;
         answer.serialize_field("score", &self.score)?;
         answer.serialize_field("most_likely", levels[self.most_likely])?;
@@ -201,7 +248,7 @@ impl<L> Serialize for ScoreAnswer<L> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename = "score")]
 struct Question<'a, L> {
-    instructions: &'a RawValue,
+    instructions: &'a Json,
     #[serde(serialize_with = "criteria")]
     criteria: &'a [Entry<L>],
 }
@@ -217,9 +264,9 @@ enum Answer {
 }
 
 impl<L> Sealed for Score<L> {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
-        let criteria = self.levels.as_slice();
+        let criteria = self.levels.entries();
         raw_question_set.push(&Question {
             instructions,
             criteria,
@@ -227,7 +274,7 @@ impl<L> Sealed for Score<L> {
     }
 
     fn read(
-        self,
+        mut self,
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
         let Answer::Score {
@@ -235,15 +282,16 @@ impl<L> Sealed for Score<L> {
             confidence,
             mut probabilities,
         } = raw_answer_set.next()?;
+        let levels = self.levels.entries();
         #[expect(clippy::cast_precision_loss, reason = "a Score has at most 10 levels")]
-        let last_position = (self.levels.len() - 1) as f64;
+        let last_position = (levels.len() - 1) as f64;
         validate_range("score", score, last_position)?;
         validate_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
-        let probabilities = (0..self.levels.len())
+        let probabilities = (0..levels.len())
             .map(|index| probabilities.remove(&index.to_string()))
             .collect::<Option<Vec<_>>>()
-            .filter(|_| count == self.levels.len())
+            .filter(|_| count == levels.len())
             .ok_or("must give a probability for each level of the Score, and no other")?;
         for &probability in &probabilities {
             validate_range("probability", probability, 1.0)?;
@@ -280,7 +328,7 @@ mod tests {
     use serde::Serialize;
     use serde_json::{Value, json};
 
-    fn serialized<L>(score: &Score<L>) -> String {
+    fn serialized<L>(mut score: Score<L>) -> String {
         let mut raw_question_set = RawQuestionSet::default();
         score.write(&mut raw_question_set);
         raw_question_set.texts()[0].to_owned()
@@ -331,7 +379,7 @@ mod tests {
         let score = Score::new("How big?", ["A line.", "A function.", "A module."]).unwrap();
 
         assert_eq!(
-            serialized(&score),
+            serialized(score),
             r#"{"type":"score","instructions":"How big?","criteria":["A line.","A function.","A module."]}"#
         );
     }
@@ -348,7 +396,7 @@ mod tests {
             Score::with_values("How long?", [1, 5], |&count| Span { unit: "day", count }).unwrap();
 
         assert_eq!(
-            serialized(&score),
+            serialized(score),
             r#"{"type":"score","instructions":"How long?","criteria":[{"unit":"day","count":1},{"unit":"day","count":5}]}"#
         );
     }
@@ -358,7 +406,7 @@ mod tests {
         let score = Score::<Severity>::of("How severe?").unwrap();
 
         assert_eq!(
-            serialized(&score),
+            serialized(score),
             r#"{"type":"score","instructions":"How severe?","criteria":["Nothing breaks.","Data is lost."]}"#
         );
     }
@@ -579,11 +627,11 @@ mod tests {
             [("A line.", 0.1), ("A function.", 0.5), ("A module.", 0.4)]
         );
 
-        let question = sizes(&probabilities).into_question();
+        let question = serialized(sizes(&probabilities).into_question());
         assert_eq!(
-            serialized(sizes(&probabilities).question()),
-            serialized(&question)
+            serialized(sizes(&probabilities).question().clone()),
+            question
         );
-        assert!(serialized(&question).contains(r#""instructions":"How big?""#));
+        assert!(question.contains(r#""instructions":"How big?""#));
     }
 }

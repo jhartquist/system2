@@ -38,7 +38,7 @@ impl<Q: QuestionSet> QuestionSet for Vec<Q> {
 }
 
 impl<Q: QuestionSet> Sealed for Vec<Q> {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
         for question_set in self {
             question_set.write(raw_question_set);
         }
@@ -59,7 +59,7 @@ impl<Q: QuestionSet, const N: usize> QuestionSet for [Q; N] {
 }
 
 impl<Q: QuestionSet, const N: usize> Sealed for [Q; N] {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
         for question_set in self {
             question_set.write(raw_question_set);
         }
@@ -85,7 +85,7 @@ impl<Q: QuestionSet> QuestionSet for Option<Q> {
 }
 
 impl<Q: QuestionSet> Sealed for Option<Q> {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
         if let Some(question_set) = self {
             question_set.write(raw_question_set);
         }
@@ -109,7 +109,7 @@ macro_rules! tuple {
         }
 
         impl<$($question_set: QuestionSet),+> Sealed for ($($question_set,)+) {
-            fn write(&self, raw_question_set: &mut RawQuestionSet) {
+            fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
                 $(self.$index.write(raw_question_set);)+
             }
 
@@ -147,7 +147,7 @@ mod tests {
         Noul::new(text).unwrap()
     }
 
-    fn instructions(question_set: &impl QuestionSet) -> Vec<Value> {
+    fn instructions(mut question_set: impl QuestionSet) -> Vec<Value> {
         let mut raw_question_set = RawQuestionSet::default();
         question_set.write(&mut raw_question_set);
         raw_question_set
@@ -176,7 +176,7 @@ mod tests {
             (Some(noul("d")), None::<Noul>),
         );
 
-        assert_eq!(instructions(&question_set), ["a", "b", "c", "d"]);
+        assert_eq!(instructions(question_set), ["a", "b", "c", "d"]);
     }
 
     #[test]

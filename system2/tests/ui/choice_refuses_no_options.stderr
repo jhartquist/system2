@@ -1,0 +1,7 @@
+error: `choice!` takes the instructions, then the options: a type, an object, or an array
+ --> tests/ui/choice_refuses_no_options.rs:4:13
+  |
+4 |     let _ = choice!("Which team owns this ticket?");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `choice` (in Nightly builds, run with -Z macro-backtrace for more info)

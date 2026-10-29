@@ -6,7 +6,8 @@ use serde_json::value::{RawValue, to_raw_value};
 use std::collections::HashMap;
 
 pub trait Sealed {
-    fn write(&self, raw_question_set: &mut RawQuestionSet);
+    // `&mut`, so a question keeps the values that it makes to send, for its answer
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet);
 
     fn read(
         self,

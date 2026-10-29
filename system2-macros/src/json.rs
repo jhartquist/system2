@@ -1,4 +1,4 @@
-use crate::part::has_placeholder;
+use crate::part::{has_placeholder, unescaped};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use std::collections::HashSet;
@@ -76,6 +76,15 @@ impl Parse for Value {
 }
 
 impl Value {
+    pub(crate) fn is_const(&self) -> bool {
+        match self {
+            Value::Literal(_) => true,
+            Value::Format(_) | Value::Expression(_) => false,
+            Value::Array(items) => items.iter().all(Value::is_const),
+            Value::Object(entries) => entries.iter().all(|(_, value)| value.is_const()),
+        }
+    }
+
     fn write(&self, writer: &mut Writer) {
         match self {
             Value::Literal(json) => writer.pending_text.push_str(json),
@@ -157,13 +166,7 @@ fn literal(lit: &Lit, sign: &str) -> syn::Result<Value> {
         Lit::Str(text) if has_placeholder(&text.value()) => return Ok(Value::Format(text.clone())),
 
         // the macro writes this json text, so it unescapes each brace as `format!` does
-        Lit::Str(text) => {
-            if text.value().replace("}}", "").contains('}') {
-                let message = "each `}` in text must be written two times, as `}}`";
-                return Err(syn::Error::new(text.span(), message));
-            }
-            quoted(&text.value().replace("{{", "{").replace("}}", "}"))
-        }
+        Lit::Str(text) => quoted(&unescaped(text)?),
         Lit::Bool(value) => value.value.to_string(),
         Lit::Int(number) if number.suffix().is_empty() => {
             format!("{sign}{}", number.base10_digits())

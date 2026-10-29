@@ -150,7 +150,7 @@ enum Answer {
 }
 
 impl Sealed for Noul {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
         let criteria = if self.criteria.is_empty() {
             None
@@ -185,7 +185,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::collections::BTreeMap;
 
-    fn serialized(noul: &Noul) -> Value {
+    fn serialized(mut noul: Noul) -> Value {
         let mut raw_question_set = RawQuestionSet::default();
         noul.write(&mut raw_question_set);
         serde_json::from_str(raw_question_set.texts()[0]).unwrap()
@@ -277,7 +277,7 @@ mod tests {
         let noul = Noul::new("Is it spam?").unwrap();
 
         assert_eq!(
-            serialized(&noul),
+            serialized(noul),
             json!({ "type": "noul", "instructions": "Is it spam?" })
         );
     }
@@ -292,7 +292,7 @@ mod tests {
         for criteria in cases {
             let noul = Noul::with_criteria("Is it spam?", &criteria).unwrap();
             assert_eq!(
-                serialized(&noul),
+                serialized(noul),
                 json!({ "type": "noul", "instructions": "Is it spam?", "criteria": criteria }),
                 "{criteria}"
             );
@@ -306,9 +306,12 @@ mod tests {
         let answer = read(noul, json!({ "type": "noul", "noul": 0.92 })).unwrap();
 
         assert_eq!(answer.probability(), 0.92);
-        assert_eq!(serialized(answer.question())["instructions"], "Is it spam?");
         assert_eq!(
-            serialized(&answer.into_question())["instructions"],
+            serialized(answer.question().clone())["instructions"],
+            "Is it spam?"
+        );
+        assert_eq!(
+            serialized(answer.into_question())["instructions"],
             "Is it spam?"
         );
     }

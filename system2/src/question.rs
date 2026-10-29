@@ -1,7 +1,8 @@
-mod choice;
+pub(crate) mod choice;
 mod error;
 pub(crate) mod noul;
-mod score;
+pub(crate) mod score;
+mod table;
 
 pub use choice::{Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, Label, Options};
 pub use error::QuestionError;

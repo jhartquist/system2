@@ -1,0 +1,5 @@
+error: a level must not be empty
+ --> tests/ui/score_refuses_an_empty_level.rs:4:44
+  |
+4 |     let _ = score!("How big?", ["A line.", ""]);
+  |                                            ^^

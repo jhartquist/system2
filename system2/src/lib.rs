@@ -18,15 +18,17 @@ pub use question::{
     Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, InvalidNoul, InvalidScore, Label, Levels,
     Noul, NoulAnswer, Options, QuestionError, Score, ScoreAnswer, ScoreLevel,
 };
-pub use system2_macros::{Levels, Options, noul};
+pub use system2_macros::{Levels, Options, choice, noul, score};
 
 pub mod prelude {
     #[doc(no_inline)]
-    pub use crate::{AskIterator, Levels, Options, QuestionSet, noul};
+    pub use crate::{AskIterator, Levels, Options, QuestionSet, choice, noul, score};
 }
 
 #[doc(hidden)]
 pub mod __private {
     pub use crate::json::{AlwaysSerialize, Json, is_blank, to_json, unescaped};
+    pub use crate::question::choice::{choice, owned_choice};
     pub use crate::question::noul::noul;
+    pub use crate::question::score::score;
 }

@@ -18,7 +18,7 @@ impl<Q: QuestionSet, T> QuestionSet for Tagged<Q, T> {
 }
 
 impl<Q: QuestionSet, T> Sealed for Tagged<Q, T> {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
         self.question_set.write(raw_question_set);
     }
 
@@ -41,7 +41,7 @@ mod tests {
         Noul::new(text).unwrap()
     }
 
-    fn texts(question_set: &impl QuestionSet) -> Vec<String> {
+    fn texts(mut question_set: impl QuestionSet) -> Vec<String> {
         let mut raw_question_set = RawQuestionSet::default();
         question_set.write(&mut raw_question_set);
         raw_question_set
@@ -55,10 +55,7 @@ mod tests {
     fn write_gives_the_questions_and_not_the_tag() {
         let question_set = (noul("a"), noul("b"));
 
-        assert_eq!(
-            texts(&question_set.clone().tag("tag")),
-            texts(&question_set)
-        );
+        assert_eq!(texts(question_set.clone().tag("tag")), texts(question_set));
     }
 
     #[test]

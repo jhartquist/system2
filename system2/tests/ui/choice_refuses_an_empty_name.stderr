@@ -1,0 +1,5 @@
+error: the name of an option must not be empty
+ --> tests/ui/choice_refuses_an_empty_name.rs:4:49
+  |
+4 |     let _ = choice!("Which language?", ["rust", " "]);
+  |                                                 ^^^

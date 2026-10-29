@@ -1,0 +1,5 @@
+error: `choice!` takes the instructions, then the options, and nothing more
+ --> tests/ui/choice_refuses_input_after_the_options.rs:4:50
+  |
+4 |     let _ = choice!("Which language?", ["rust"], ["go"]);
+  |                                                  ^

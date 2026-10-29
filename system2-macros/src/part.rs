@@ -1,14 +1,15 @@
 use crate::json::Value;
 use proc_macro2::{Group, TokenStream};
-use quote::{ToTokens, quote};
+use quote::{ToTokens, quote, quote_spanned};
 use std::str::Chars;
 use syn::parse::ParseStream;
-use syn::{Expr, ExprLit, ExprMacro, Lit, LitStr, token};
+use syn::spanned::Spanned;
+use syn::{Expr, ExprLit, ExprMacro, Lit, LitStr, Token, Type, token};
 
 // one part of a question, such as the instructions or a criterion
 pub(crate) struct Part {
     // such as "the instructions", for the messages
-    name: &'static str,
+    name: String,
     form: Form,
 }
 
@@ -24,11 +25,8 @@ enum Form {
 
 impl Part {
     // `constructor` takes the part from data, as the fix in a message
-    pub(crate) fn parse(
-        input: ParseStream,
-        name: &'static str,
-        constructor: &str,
-    ) -> syn::Result<Self> {
+    pub(crate) fn parse(input: ParseStream, name: &str, constructor: &str) -> syn::Result<Self> {
+        let name = name.to_owned();
         if input.peek(token::Brace) || input.peek(token::Bracket) {
             let group: Group = input.fork().parse()?;
             if group.stream().is_empty() {
@@ -68,6 +66,15 @@ impl Part {
         };
         Ok(Part { name, form })
     }
+
+    // a const can hold only a part with no value from run time
+    pub(crate) fn is_const(&self) -> bool {
+        match &self.form {
+            Form::Literal(literal) => !has_placeholder(&literal.value()),
+            Form::Constant(_) => true,
+            Form::Json(value) => value.is_const(),
+        }
+    }
 }
 
 impl ToTokens for Part {
@@ -104,6 +111,63 @@ impl ToTokens for Part {
         };
         tokens.extend(part);
     }
+}
+
+pub(crate) fn optional(part: Option<&Part>) -> TokenStream {
+    if let Some(part) = part {
+        quote!(::core::option::Option::Some(#part))
+    } else {
+        quote!(::core::option::Option::None)
+    }
+}
+
+// a literal with no placeholder, with each brace one time, as `format!` writes it
+pub(crate) fn unescaped(literal: &LitStr) -> syn::Result<String> {
+    let text = literal.value();
+    if text.replace("}}", "").contains('}') {
+        let message = "each `}` in text must be written two times, as `}}`";
+        return Err(syn::Error::new(literal.span(), message));
+    }
+    Ok(text.replace("{{", "{").replace("}}", "}"))
+}
+
+// the type of `choice!` or `score!`: a macro cannot tell a type from a variable, so it takes each
+// path as a type, and rustc refuses a variable where the expansion names the type
+pub(crate) fn parse_type(input: ParseStream, message: &str) -> syn::Result<Type> {
+    let fork = input.fork();
+    if let Ok(ty) = fork.parse::<Type>()
+        && !matches!(ty, Type::Macro(_))
+        && (fork.is_empty() || fork.peek(Token![,]))
+    {
+        return input.parse();
+    }
+    let rest: TokenStream = input.parse()?;
+    Err(syn::Error::new_spanned(rest, message))
+}
+
+// a value goes in a const block: the values come from a `fn` that captures nothing, so a value
+// from run time gets its error at the value
+pub(crate) fn constant_value(value: &Expr) -> TokenStream {
+    quote_spanned!(value.span()=> const { #value })
+}
+
+// a name or a level: a format string with no placeholder, so the macro can compare two of them
+pub(crate) fn name_or_level(
+    literal: &LitStr,
+    name: &str,
+    constructor: &str,
+) -> syn::Result<LitStr> {
+    if has_placeholder(&literal.value()) {
+        let message =
+            format!("{name} must have no placeholder: for text from data, use `{constructor}`");
+        return Err(syn::Error::new(literal.span(), message));
+    }
+    let text = unescaped(literal)?;
+    if text.trim().is_empty() {
+        let message = format!("{name} must not be empty");
+        return Err(syn::Error::new(literal.span(), message));
+    }
+    Ok(LitStr::new(&text, literal.span()))
 }
 
 // give `format!` a targeted error, as a literal already takes placeholders
@@ -149,7 +213,41 @@ fn skip_placeholder(chars: &mut Chars) {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_placeholder, has_text_outside_placeholders};
+    use super::{Part, has_placeholder, has_text_outside_placeholders, unescaped};
+    use proc_macro2::Span;
+    use quote::quote;
+    use syn::LitStr;
+    use syn::parse::{ParseStream, Parser};
+
+    #[test]
+    fn is_const_refuses_a_value_from_run_time() {
+        let cases = [
+            (quote!("Is it spam?"), true),
+            (quote!("Is `{{}}` a block?"), true),
+            (quote!(PURE_TEXT), true),
+            (quote!({ "a": [1, "b", null] }), true),
+            (quote!("Is {name} tested?"), false),
+            (quote!({ "a": rule }), false),
+            (quote!({ "a": 1, "b": rule }), false),
+            (quote!(["a", { "b": "{name}" }]), false),
+        ];
+        for (tokens, constant) in cases {
+            let parse = |input: ParseStream| Part::parse(input, "a part", "Noul::new");
+            let part = parse.parse2(tokens.clone()).unwrap();
+            assert_eq!(part.is_const(), constant, "{tokens}");
+        }
+    }
+
+    #[test]
+    fn unescaped_gives_each_brace_one_time() {
+        let literal = |text| LitStr::new(text, Span::call_site());
+
+        assert_eq!(unescaped(&literal("a {{b}} c")).unwrap(), "a {b} c");
+        assert_eq!(
+            unescaped(&literal("a } b")).unwrap_err().to_string(),
+            "each `}` in text must be written two times, as `}}`"
+        );
+    }
 
     #[test]
     fn has_placeholder_takes_two_braces_as_a_brace() {

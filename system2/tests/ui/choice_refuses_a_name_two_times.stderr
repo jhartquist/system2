@@ -1,0 +1,5 @@
+error: each option must have a different name, but two options have the name `go`
+ --> tests/ui/choice_refuses_a_name_two_times.rs:4:55
+  |
+4 |     let _ = choice!("Which language?", ["go", "rust", "go"]);
+  |                                                       ^^^^

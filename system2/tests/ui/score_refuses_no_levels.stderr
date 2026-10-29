@@ -1,0 +1,7 @@
+error: `score!` takes the instructions, then the levels: a type or an array
+ --> tests/ui/score_refuses_no_levels.rs:4:13
+  |
+4 |     let _ = score!("How big is the change?");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `score` (in Nightly builds, run with -Z macro-backtrace for more info)

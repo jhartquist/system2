@@ -1,0 +1,5 @@
+error: a Choice must have 1 to 255 options, not 0
+ --> tests/ui/choice_refuses_empty_options.rs:4:53
+  |
+4 |     let _ = choice!("Which team owns this ticket?", []);
+  |                                                     ^^

@@ -1,0 +1,8 @@
+error[E0277]: `String` must derive `Options` to give the options of a Choice
+ --> tests/ui/choice_refuses_a_type_without_options.rs:4:36
+  |
+4 |     let _ = choice!("Which name?", String);
+  |                                    ^^^^^^ does not derive `Options`
+  |
+  = help: the trait `Options` is not implemented for `String`
+  = note: add `#[derive(Options)]` to an enum, or use `Choice::with_values` for other types

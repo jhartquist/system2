@@ -84,7 +84,7 @@ impl Client {
 
     pub fn ask<Q: QuestionSet, S: Serialize + ?Sized>(
         &self,
-        question_set: Q,
+        mut question_set: Q,
         state: &S,
     ) -> AskFuture<Q> {
         let mut raw_question_set = RawQuestionSet::default();

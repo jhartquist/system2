@@ -1,8 +1,11 @@
+use super::table::Table;
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
+use crate::json::Json;
 use crate::{InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
@@ -10,14 +13,17 @@ const MAX_OPTIONS: usize = 255;
 
 #[derive(Debug, Clone)]
 pub struct Choice<O> {
-    instructions: Box<RawValue>,
-    options: Vec<Entry<O>>,
+    instructions: Json,
+    options: Table<MacroOption<O>, Entry<O>>,
 }
+
+// an option as a macro writes it: the name, the description, and the value
+type MacroOption<O> = (&'static str, Option<Json>, O);
 
 #[derive(Debug, Clone)]
 struct Entry<O> {
-    name: String,
-    description: Option<Box<RawValue>>,
+    name: Cow<'static, str>,
+    description: Option<Json>,
     value: O,
 }
 
@@ -30,6 +36,10 @@ pub trait Options: Sized + 'static {
     // only the derive writes the table, so its shape can change
     #[doc(hidden)]
     const OPTIONS: &'static [ChoiceOption<Self>];
+
+    // `choice!` names the type in a path to this, where rustc refuses a variable as not a type
+    #[doc(hidden)]
+    const MACRO_OPTIONS: fn() -> Vec<MacroOption<Self>> = options_of::<Self>;
 }
 
 #[doc(hidden)]
@@ -113,7 +123,7 @@ impl<O> Choice<O> {
         let options = options
             .into_iter()
             .map(|(value, description)| {
-                let name = value.to_string();
+                let name = Cow::Owned(value.to_string());
                 let description = json::validate_optional(description);
                 Entry::new(name, description, value)
             })
@@ -131,7 +141,7 @@ impl<O> Choice<O> {
             .into_iter()
             .map(|value| {
                 let label = label(&value);
-                Entry::new(label.name(), label.description(), value)
+                Entry::new(Cow::Owned(label.name()), label.description(), value)
             })
             .collect::<Result<_, _>>()?;
         Self::validated(instructions, options)
@@ -146,7 +156,7 @@ impl<O> Choice<O> {
             .iter()
             .map(|option| {
                 let description = json::validate_optional(option.description);
-                Entry::new(option.name.to_owned(), description, (option.value)())
+                Entry::new(Cow::Borrowed(option.name), description, (option.value)())
             })
             .collect::<Result<_, _>>()?;
         Self::validated(instructions, options)
@@ -168,9 +178,11 @@ impl<O> Choice<O> {
         }
         let mut names = HashSet::new();
         if let Some(option) = options.iter().find(|o| !names.insert(&o.name)) {
-            let name = option.name.clone();
+            let name = option.name.to_string();
             return Err(InvalidChoice::Duplicate { name });
         }
+        let instructions = Json::from(instructions);
+        let options = Table::Owned(options);
         Ok(Choice {
             instructions,
             options,
@@ -178,21 +190,67 @@ impl<O> Choice<O> {
     }
 }
 
+#[doc(hidden)]
+#[must_use]
+pub const fn choice<O>(instructions: Json, options: fn() -> Vec<MacroOption<O>>) -> Choice<O> {
+    let options = Table::Deferred(options);
+    Choice {
+        instructions,
+        options,
+    }
+}
+
+// a description from run time cannot go in a `fn`, so the macro gives the options owned
+#[doc(hidden)]
+#[must_use]
+pub fn owned_choice<O>(instructions: Json, options: Vec<MacroOption<O>>) -> Choice<O> {
+    let options = Table::Owned(options.into_iter().map(Entry::from).collect());
+    Choice {
+        instructions,
+        options,
+    }
+}
+
+// the derive has validated the table, so only `of` validates it again
+fn options_of<O: Options>() -> Vec<MacroOption<O>> {
+    O::OPTIONS
+        .iter()
+        .map(|option| {
+            let description = option.description.map(|d| Json::String(Cow::Borrowed(d)));
+            (option.name, description, (option.value)())
+        })
+        .collect()
+}
+
 impl<O> Entry<O> {
     fn new(
-        name: String,
+        name: Cow<'static, str>,
         description: Result<Option<Box<RawValue>>, InvalidJson>,
         value: O,
     ) -> Result<Self, InvalidChoice> {
         let description = match description {
-            Ok(description) => description,
-            Err(error) => return Err(InvalidChoice::Description { name, error }),
+            Ok(description) => description.map(Json::from),
+            Err(error) => {
+                let name = name.into_owned();
+                return Err(InvalidChoice::Description { name, error });
+            }
         };
         Ok(Entry {
             name,
             description,
             value,
         })
+    }
+}
+
+impl<O> From<MacroOption<O>> for Entry<O> {
+    fn from((name, description, value): MacroOption<O>) -> Self {
+        let name = Cow::Borrowed(name);
+        Entry {
+            name,
+            description,
+            value,
+        }
     }
 }
 
@@ -236,12 +294,12 @@ impl<O> ChoiceAnswer<O> {
 
     #[must_use]
     pub fn most_likely(&self) -> &O {
-        &self.question.options[self.choice].value
+        &self.question.options.as_entries()[self.choice].value
     }
 
     #[must_use]
     pub fn into_most_likely(self) -> O {
-        let mut options = self.question.options;
+        let mut options = self.question.options.into_entries();
         options.swap_remove(self.choice).value
     }
 
@@ -261,6 +319,7 @@ impl<O> ChoiceAnswer<O> {
     pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&O, f64)> {
         self.question
             .options
+            .as_entries()
             .iter()
             .zip(&self.probabilities)
             .map(|(option, &probability)| (&option.value, probability))
@@ -270,6 +329,7 @@ impl<O> ChoiceAnswer<O> {
     pub fn into_probabilities(self) -> Vec<(O, f64)> {
         self.question
             .options
+            .into_entries()
             .into_iter()
             .zip(self.probabilities)
             .map(|(option, probability)| (option.value, probability))
@@ -280,7 +340,8 @@ impl<O> ChoiceAnswer<O> {
 impl<O> Serialize for ChoiceAnswer<O> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         // the names, so a value needs no `Serialize`
-        let names: Vec<_> = self.question.options.iter().map(|o| &o.name).collect();
+        let options = self.question.options.as_entries();
+        let names: Vec<_> = options.iter().map(|o| &o.name).collect();
         let mut answer = serializer.serialize_struct("ChoiceAnswer", 4)?;
         answer.serialize_field("most_likely", names[self.choice])?;
         answer.serialize_field("confidence", &self.confidence)?;
@@ -293,7 +354,7 @@ impl<O> Serialize for ChoiceAnswer<O> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename = "choice")]
 struct Question<'a, O> {
-    instructions: &'a RawValue,
+    instructions: &'a Json,
     #[serde(serialize_with = "criteria")]
     criteria: &'a [Entry<O>],
 }
@@ -309,9 +370,9 @@ enum Answer {
 }
 
 impl<O> Sealed for Choice<O> {
-    fn write(&self, raw_question_set: &mut RawQuestionSet) {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
         let instructions = &self.instructions;
-        let criteria = self.options.as_slice();
+        let criteria = self.options.entries();
         raw_question_set.push(&Question {
             instructions,
             criteria,
@@ -319,7 +380,7 @@ impl<O> Sealed for Choice<O> {
     }
 
     fn read(
-        self,
+        mut self,
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
         let Answer::Choice {
@@ -327,19 +388,18 @@ impl<O> Sealed for Choice<O> {
             confidence,
             mut probabilities,
         } = raw_answer_set.next()?;
-        let choice = self
-            .options
+        let options = self.options.entries();
+        let choice = options
             .iter()
             .position(|o| o.name == choice)
             .ok_or_else(|| format!("must choose an option of the Choice, not `{choice}`"))?;
         validate_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
-        let probabilities = self
-            .options
+        let probabilities = options
             .iter()
-            .map(|o| probabilities.remove(&o.name))
+            .map(|o| probabilities.remove(o.name.as_ref()))
             .collect::<Option<Vec<_>>>()
-            .filter(|_| count == self.options.len())
+            .filter(|_| count == options.len())
             .ok_or("must give a probability for each option of the Choice, and no other")?;
         for &probability in &probabilities {
             validate_range("probability", probability, 1.0)?;
@@ -367,7 +427,7 @@ mod tests {
     use serde_json::{Map, Value, json};
     use std::collections::BTreeMap;
 
-    fn serialized<O>(choice: &Choice<O>) -> String {
+    fn serialized<O>(mut choice: Choice<O>) -> String {
         let mut raw_question_set = RawQuestionSet::default();
         choice.write(&mut raw_question_set);
         raw_question_set.texts()[0].to_owned()
@@ -421,11 +481,11 @@ mod tests {
         let languages = Choice::new("Which language?", ["rust", "python", "go"]).unwrap();
 
         assert_eq!(
-            serialized(&years),
+            serialized(years),
             r#"{"type":"choice","instructions":"In which year?","criteria":{"2026":null,"2027":null}}"#
         );
         assert_eq!(
-            serialized(&languages),
+            serialized(languages),
             r#"{"type":"choice","instructions":"Which language?","criteria":{"rust":null,"python":null,"go":null}}"#
         );
     }
@@ -442,15 +502,15 @@ mod tests {
 
         let cases = [
             (
-                serialized(&Choice::with_descriptions("What next?", pairs).unwrap()),
+                serialized(Choice::with_descriptions("What next?", pairs).unwrap()),
                 r#"{"block":"Ask for a fix.","approve":"Approve it."}"#,
             ),
             (
-                serialized(&Choice::with_descriptions("What next?", &sorted).unwrap()),
+                serialized(Choice::with_descriptions("What next?", &sorted).unwrap()),
                 r#"{"approve":{"when":"tests pass"},"block":null}"#,
             ),
             (
-                serialized(&Choice::with_descriptions("What next?", &map).unwrap()),
+                serialized(Choice::with_descriptions("What next?", &map).unwrap()),
                 r#"{"block":"Ask for a fix."}"#,
             ),
         ];
@@ -496,10 +556,10 @@ mod tests {
                 .1
                 .to_owned()
         };
-        assert_eq!(criteria(&by_id), r#"{"7":null,"3":null}}"#);
-        assert_eq!(criteria(&by_name), r#"{"search":null,"edit":null}}"#);
+        assert_eq!(criteria(by_id), r#"{"7":null,"3":null}}"#);
+        assert_eq!(criteria(by_name), r#"{"search":null,"edit":null}}"#);
         assert_eq!(
-            criteria(&described),
+            criteria(described),
             r#"{"search":"Find a file.","edit":null}}"#
         );
     }
@@ -509,7 +569,7 @@ mod tests {
         let choice = Choice::<Problem>::of("What is the worst problem?").unwrap();
 
         assert_eq!(
-            serialized(&choice),
+            serialized(choice),
             concat!(
                 r#"{"type":"choice","instructions":"What is the worst problem?","#,
                 r#""criteria":{"crash":"The code panics for some input.","no_problem":null}}"#,
@@ -720,8 +780,8 @@ mod tests {
             [("rust", 0.2), ("python", 0.4), ("go", 0.4)]
         );
 
-        let question = languages().into_question();
-        assert_eq!(serialized(languages().question()), serialized(&question));
-        assert!(serialized(&question).contains(r#""instructions":"Which language?""#));
+        let question = serialized(languages().into_question());
+        assert_eq!(serialized(languages().question().clone()), question);
+        assert!(question.contains(r#""instructions":"Which language?""#));
     }
 }

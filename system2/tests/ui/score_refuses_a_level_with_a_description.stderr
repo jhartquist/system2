@@ -1,0 +1,5 @@
+error: each level must be text, or a tuple of `(level, value)`
+ --> tests/ui/score_refuses_a_level_with_a_description.rs:4:34
+  |
+4 |     let _ = score!("How long?", [("A day.", "One day of work.", 1)]);
+  |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

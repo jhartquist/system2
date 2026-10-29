@@ -1,0 +1,5 @@
+error: a level must have no placeholder: for text from data, use `Score::new`
+ --> tests/ui/score_refuses_a_placeholder_in_a_level.rs:4:44
+  |
+4 |     let _ = score!("How big?", ["A line.", "{count} lines."]);
+  |                                            ^^^^^^^^^^^^^^^^

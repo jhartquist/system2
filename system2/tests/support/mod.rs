@@ -3,6 +3,7 @@
 
 use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
+use std::cell::Cell;
 use std::collections::HashMap;
 use system2::{Client, Noul};
 use wiremock::matchers::{method, path};
@@ -10,6 +11,24 @@ use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 pub(crate) const INSTRUCTIONS: &str = "Is this message spam?";
 pub(crate) const STATE: &str = "Buy now!";
+
+thread_local! {
+    static COUNTED_DROPS: Cell<usize> = const { Cell::new(0) };
+}
+
+// a value that counts its drops, so a test sees when a question makes and drops its values
+#[derive(Debug)]
+pub(crate) struct Counted;
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        COUNTED_DROPS.set(COUNTED_DROPS.get() + 1);
+    }
+}
+
+pub(crate) fn counted_drops() -> usize {
+    COUNTED_DROPS.get()
+}
 
 pub(crate) async fn mock_api(response: ResponseTemplate) -> MockServer {
     let server = MockServer::start().await;
