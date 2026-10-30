@@ -1,4 +1,5 @@
 mod error;
+pub(crate) mod field;
 mod future;
 mod question_set;
 mod questions;

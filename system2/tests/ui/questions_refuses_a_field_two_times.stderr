@@ -1,0 +1,5 @@
+error: the field `buggy` must occur one time at most
+ --> tests/ui/questions_refuses_a_field_two_times.rs:7:40
+  |
+7 |     let _ = questions! { buggy: BUGGY, buggy: BUGGY };
+  |                                        ^^^^^

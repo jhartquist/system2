@@ -1,0 +1,5 @@
+error: the field `id` must occur one time at most
+ --> tests/ui/questions_refuses_a_raw_field_two_times.rs:4:33
+  |
+4 |     let _ = questions! { id: 1, r#id: 2 };
+  |                                 ^^^^

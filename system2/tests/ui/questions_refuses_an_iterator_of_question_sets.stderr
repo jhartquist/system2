@@ -1,0 +1,13 @@
+error[E0277]: a field of `questions!` must be a question set, not an iterator of them
+ --> tests/ui/questions_refuses_an_iterator_of_question_sets.rs:5:34
+  |
+5 |     let _ = questions! { checks: texts.iter().map(|text| noul!("Is it {text}?")) };
+  |                                  ^^^^^ an iterator of question sets
+  |
+  = help: the trait `system2::ask::field::QuestionSetNotIterator` is not implemented for `Map<std::slice::Iter<'_, &str>, {closure@$DIR/tests/ui/questions_refuses_an_iterator_of_question_sets.rs:5:51: 5:57}>`
+  = note: collect it into a `Vec`, which is a question set: `.collect::<Vec<_>>()`, or `.collect::<Result<Vec<_>, _>>()?` for `Result`s
+note: required by a bound in `system2::ask::field::IteratorField::into_field`
+ --> src/ask/field.rs
+  |
+  |     pub fn into_field<T: QuestionSetNotIterator>(self, field: T) -> Value<T> {
+  |                          ^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `IteratorField::into_field`

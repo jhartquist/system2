@@ -1,0 +1,13 @@
+error[E0277]: a field of `questions!` must be a question set, not a `Result` of one
+ --> tests/ui/questions_refuses_a_result_of_a_question_set.rs:5:32
+  |
+5 |     let _ = questions! { rule: Noul::new("Is the rule broken?") };
+  |                                ^^^^ a `Result` of a question set
+  |
+  = help: the trait `system2::ask::field::QuestionSetNotResult` is not implemented for `Result<system2::Noul, InvalidNoul>`
+  = note: add `?` to give the question set, or the error to the caller
+note: required by a bound in `system2::ask::field::ResultField::into_field`
+ --> src/ask/field.rs
+  |
+  |     pub fn into_field<T: QuestionSetNotResult>(self, field: T) -> Value<T> {
+  |                          ^^^^^^^^^^^^^^^^^^^^ required by this bound in `ResultField::into_field`

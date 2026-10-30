@@ -5,6 +5,7 @@ mod derive;
 mod json;
 mod noul;
 mod part;
+mod questions;
 mod score;
 
 use proc_macro::TokenStream;
@@ -27,6 +28,12 @@ pub fn choice(input: TokenStream) -> TokenStream {
 pub fn score(input: TokenStream) -> TokenStream {
     let score = parse_macro_input!(input as score::Score);
     score.into_token_stream().into()
+}
+
+#[proc_macro]
+pub fn questions(input: TokenStream) -> TokenStream {
+    let questions = parse_macro_input!(input as questions::Questions);
+    questions.into_token_stream().into()
 }
 
 #[proc_macro_derive(Options, attributes(system2))]

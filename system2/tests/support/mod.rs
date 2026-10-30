@@ -99,6 +99,13 @@ pub(crate) fn request_text(request: &Request) -> String {
     String::from_utf8(body).unwrap()
 }
 
+pub(crate) fn instructions(request: &Request) -> Vec<Value> {
+    let questions = &request_body(request)["questions"];
+    (0..questions.as_object().unwrap().len())
+        .map(|index| questions[format!("q{index}")]["instructions"].clone())
+        .collect()
+}
+
 pub(crate) fn question_texts(request: &Request) -> Vec<String> {
     #[derive(serde::Deserialize)]
     struct Body {
