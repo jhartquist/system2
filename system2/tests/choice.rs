@@ -425,3 +425,10 @@ async fn choice_infers_each_value_from_the_question() {
     assert_eq!(many.into_most_likely(), 5_000_000_000);
     assert_eq!(generic.into_most_likely(), 5_000_000_000);
 }
+
+#[test]
+fn debug_shows_the_options_of_a_question_from_a_macro() {
+    let from_data = Choice::<Problem>::of("What is the worst problem in this code?").unwrap();
+
+    assert_eq!(format!("{PROBLEM:?}"), format!("{from_data:?}"));
+}

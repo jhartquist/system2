@@ -1,6 +1,8 @@
+use std::fmt;
+
 // the options or the levels of a question: rust cannot make a `Vec` with items in a const, so a
 // macro gives a function that makes them at the first use, and a constructor gives them owned
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) enum Table<M, E> {
     Deferred(fn() -> Vec<M>),
     Owned(Vec<E>),
@@ -28,6 +30,20 @@ impl<M, E: From<M>> Table<M, E> {
         match self {
             Table::Owned(entries) => entries,
             Table::Deferred(_) => unreachable!("a table is owned after its first use"),
+        }
+    }
+}
+
+// `Debug` cannot keep the entries, so a deferred table makes them again to show them, and a
+// question prints the same before and after its first use
+impl<M, E: From<M> + fmt::Debug> fmt::Debug for Table<M, E> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Table::Deferred(macro_entries) => formatter
+                .debug_list()
+                .entries(entries_of::<M, E>(*macro_entries))
+                .finish(),
+            Table::Owned(entries) => formatter.debug_list().entries(entries).finish(),
         }
     }
 }
@@ -65,6 +81,16 @@ mod tests {
         let table: Table<u8, u32> = Table::Owned(vec![1, 2]);
 
         assert_eq!(table.as_entries(), [1, 2]);
+    }
+
+    #[test]
+    fn fmt_shows_the_entries_of_each_table() {
+        let tables: [Table<u8, u32>; 2] =
+            [Table::Deferred(|| vec![1, 2]), Table::Owned(vec![1, 2])];
+
+        for table in tables {
+            assert_eq!(format!("{table:?}"), "[1, 2]");
+        }
     }
 
     #[test]

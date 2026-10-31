@@ -1,5 +1,6 @@
 use serde::ser::Error;
 use serde::{Serialize, Serializer};
+use serde_json::Value;
 use serde_json::value::{RawValue, to_raw_value};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -10,7 +11,7 @@ use std::sync::Arc;
 // the instructions or a criterion, after a macro or a constructor validates it: text, an
 // object, or an array, and never empty
 #[doc(hidden)]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Json {
     // the value of a json string, such as `Is it "spam"?`, which goes out as `"Is it \"spam\"?"`
     String(Cow<'static, str>),
@@ -21,6 +22,16 @@ pub enum Json {
 impl From<Box<RawValue>> for Json {
     fn from(json: Box<RawValue>) -> Self {
         Json::Raw(Cow::Owned(Box::<str>::from(json).into_string()))
+    }
+}
+
+// shows the json that goes out, so text from a macro and from a constructor look the same
+impl fmt::Debug for Json {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Json::String(text) => fmt::Display::fmt(&Value::from(text.as_ref()), formatter),
+            Json::Raw(json) => formatter.write_str(json),
+        }
     }
 }
 
@@ -186,6 +197,32 @@ mod tests {
     use serde_json::value::RawValue;
     use std::borrow::Cow;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn fmt_shows_the_json_that_goes_out() {
+        let cases = [
+            (
+                Json::String(Cow::Borrowed(r#"Is it "spam"?"#)),
+                r#""Is it \"spam\"?""#,
+            ),
+            (
+                Json::String(Cow::Borrowed("Is it \u{1}?")),
+                r#""Is it \u0001?""#,
+            ),
+            (
+                Json::Raw(Cow::Borrowed(r#""Is it spam?""#)),
+                r#""Is it spam?""#,
+            ),
+            (
+                Json::Raw(Cow::Borrowed(r#"{"policy":"No secrets."}"#)),
+                r#"{"policy":"No secrets."}"#,
+            ),
+        ];
+
+        for (json, shown) in cases {
+            assert_eq!(format!("{json:?}"), shown);
+        }
+    }
 
     #[test]
     fn serialize_quotes_only_a_string() {
