@@ -1,43 +1,5 @@
-use super::wire::{RawAnswerSet, RawQuestionSet, Sealed};
-use crate::QuestionSet;
+use crate::{Noul, QuestionSet};
 use std::marker::PhantomData;
-
-// a field of `questions! { … }`: a question set, which the request asks, or another value,
-// which is not sent and moves into the answers as it is
-#[doc(hidden)]
-pub trait Field {
-    type AnswerSet;
-
-    fn write(&mut self, raw_question_set: &mut RawQuestionSet);
-
-    fn read(self, raw_answer_set: &mut RawAnswerSet) -> Result<Self::AnswerSet, String>;
-}
-
-impl<Q: QuestionSet> Field for Q {
-    type AnswerSet = Q::AnswerSet;
-
-    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
-        Sealed::write(self, raw_question_set);
-    }
-
-    fn read(self, raw_answer_set: &mut RawAnswerSet) -> Result<Self::AnswerSet, String> {
-        Sealed::read(self, raw_answer_set)
-    }
-}
-
-#[doc(hidden)]
-#[derive(Debug, Clone)]
-pub struct Value<T>(T);
-
-impl<T> Field for Value<T> {
-    type AnswerSet = T;
-
-    fn write(&mut self, _raw_question_set: &mut RawQuestionSet) {}
-
-    fn read(self, _raw_answer_set: &mut RawAnswerSet) -> Result<Self::AnswerSet, String> {
-        Ok(self.0)
-    }
-}
 
 // a call, so the closure sees the type of the value before it selects the kind of the field
 #[doc(hidden)]
@@ -46,7 +8,7 @@ pub fn field<T, F>(value: T, into_field: impl FnOnce(T) -> F) -> F {
 }
 
 // the type of a field selects its kind by autoref: a method on more references wins, so
-// `(&&&&&&Probe::of(&field)).field_kind()` tries each kind from the top, and a value is last
+// `(&&&&&&Probe::of(&field)).field_kind()` tries each kind from the top, and other data is last
 #[doc(hidden)]
 pub struct Probe<T>(PhantomData<T>);
 
@@ -132,13 +94,13 @@ impl<Q: QuestionSet> QuestionSetOrResult for Q {}
 impl<Q: QuestionSet, E> QuestionSetOrResult for Result<Q, E> {}
 
 #[doc(hidden)]
-pub trait ValueKind {
-    fn field_kind(&self) -> ValueField;
+pub trait DataKind {
+    fn field_kind(&self) -> DataField;
 }
 
-impl<T> ValueKind for Probe<T> {
-    fn field_kind(&self) -> ValueField {
-        ValueField
+impl<T> DataKind for Probe<T> {
+    fn field_kind(&self) -> DataField {
+        DataField
     }
 }
 
@@ -152,26 +114,17 @@ impl QuestionSetField {
     }
 }
 
-#[doc(hidden)]
-pub struct ValueField;
-
-#[expect(clippy::unused_self, reason = "the kind is the type of `self`")]
-impl ValueField {
-    pub fn into_field<T>(self, field: T) -> Value<T> {
-        Value(field)
-    }
-}
-
-// a field of a wrong kind fails the bound of its `into_field`, at the field, with a fix: the
-// traits of these bounds have no impls, so the bound always fails
+// these unimplemented bounds report errors at the offending field, and the empty question set
+// avoids cascading errors at `ask`
+type EmptyQuestionSet = [Noul; 0];
 
 #[doc(hidden)]
 pub struct ReferenceField;
 
 #[expect(clippy::unused_self, reason = "the kind is the type of `self`")]
 impl ReferenceField {
-    pub fn into_field<T: OwnedQuestionSet>(self, field: T) -> Value<T> {
-        Value(field)
+    pub fn into_field<T: OwnedQuestionSet>(self, _field: T) -> EmptyQuestionSet {
+        []
     }
 }
 
@@ -188,8 +141,8 @@ pub struct ResultField;
 
 #[expect(clippy::unused_self, reason = "the kind is the type of `self`")]
 impl ResultField {
-    pub fn into_field<T: QuestionSetNotResult>(self, field: T) -> Value<T> {
-        Value(field)
+    pub fn into_field<T: QuestionSetNotResult>(self, _field: T) -> EmptyQuestionSet {
+        []
     }
 }
 
@@ -206,8 +159,8 @@ pub struct IteratorField;
 
 #[expect(clippy::unused_self, reason = "the kind is the type of `self`")]
 impl IteratorField {
-    pub fn into_field<T: QuestionSetNotIterator>(self, field: T) -> Value<T> {
-        Value(field)
+    pub fn into_field<T: QuestionSetNotIterator>(self, _field: T) -> EmptyQuestionSet {
+        []
     }
 }
 
@@ -220,63 +173,28 @@ impl IteratorField {
 )]
 pub trait QuestionSetNotIterator {}
 
+// the real `QuestionSet` bound, so rustc suggests it for unconstrained type parameters
+#[doc(hidden)]
+pub struct DataField;
+
+#[expect(clippy::unused_self, reason = "the kind is the type of `self`")]
+impl DataField {
+    pub fn into_field<T: QuestionSet>(self, _field: T) -> EmptyQuestionSet {
+        []
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Field, IteratorField, IteratorKind, OwnedQuestionSet, Probe, QuestionSetField,
-        QuestionSetKind, QuestionSetNotIterator, QuestionSetNotResult, ReferenceField,
-        ReferenceKind, ResultField, ResultKind, Value, ValueField, ValueKind,
+        DataField, DataKind, EmptyQuestionSet, IteratorField, IteratorKind, OwnedQuestionSet,
+        Probe, QuestionSetField, QuestionSetKind, QuestionSetNotIterator, QuestionSetNotResult,
+        ReferenceField, ReferenceKind, ResultField, ResultKind,
     };
-    use crate::ask::wire::{RawAnswerSet, RawQuestionSet};
     use crate::{Noul, QuestionError};
-    use serde_json::json;
 
     fn noul(text: &str) -> Noul {
         Noul::new(text).unwrap()
-    }
-
-    fn texts(mut field: impl Field) -> Vec<String> {
-        let mut raw_question_set = RawQuestionSet::default();
-        field.write(&mut raw_question_set);
-        raw_question_set
-            .texts()
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
-    }
-
-    #[test]
-    fn write_gives_the_questions_of_a_question_set_and_none_of_a_value() {
-        assert_eq!(
-            texts((noul("a"), noul("b"))),
-            [
-                r#"{"type":"noul","instructions":"a"}"#,
-                r#"{"type":"noul","instructions":"b"}"#
-            ]
-        );
-        assert_eq!(texts(ValueField.into_field(7)), Vec::<String>::new());
-    }
-
-    #[test]
-    fn read_gives_the_answer_set_of_a_question_set() {
-        let answers = vec![json!({ "type": "noul", "noul": 0.1 })];
-
-        let answer = Field::read(noul("a"), &mut RawAnswerSet::of(answers)).unwrap();
-
-        assert_eq!(answer.probability(), 0.1);
-    }
-
-    #[test]
-    fn read_gives_a_value_back_and_reads_no_answer() {
-        let mut raw_answer_set = RawAnswerSet::of(vec![json!({ "type": "noul", "noul": 0.1 })]);
-
-        let value = ValueField
-            .into_field("tag")
-            .read(&mut raw_answer_set)
-            .unwrap();
-
-        assert_eq!(value, "tag");
-        assert!(noul("a").read(&mut raw_answer_set).is_ok());
     }
 
     #[test]
@@ -291,7 +209,10 @@ mod tests {
         let result = Ok::<_, QuestionError>(noul("a"));
         let iterator = [noul("a")].into_iter();
         let results = [Ok::<_, QuestionError>(noul("a"))].into_iter();
-        let value = &Some(7);
+        let data = &Some(7);
+        let borrowed_three_times = &&&option;
+        let borrowed_list = vec![&option];
+        let borrowed_iterator = [&option].into_iter();
 
         let _: QuestionSetField = (&&&&&&Probe::of(&option)).field_kind();
         let _: ReferenceField = (&&&&&&Probe::of(&borrowed)).field_kind();
@@ -302,8 +223,11 @@ mod tests {
         let _: ResultField = (&&&&&&Probe::of(&result)).field_kind();
         let _: IteratorField = (&&&&&&Probe::of(&iterator)).field_kind();
         let _: IteratorField = (&&&&&&Probe::of(&results)).field_kind();
-        let _: ValueField = (&&&&&&Probe::of(&value)).field_kind();
-        let _: ValueField = (&&&&&&Probe::of(&&value)).field_kind();
+        let _: DataField = (&&&&&&Probe::of(&data)).field_kind();
+        let _: DataField = (&&&&&&Probe::of(&&data)).field_kind();
+        let _: DataField = (&&&&&&Probe::of(&borrowed_three_times)).field_kind();
+        let _: DataField = (&&&&&&Probe::of(&borrowed_list)).field_kind();
+        let _: DataField = (&&&&&&Probe::of(&borrowed_iterator)).field_kind();
         let _: QuestionSetField = (&&&&&&Probe::of(&question_set)).field_kind();
     }
 
@@ -315,10 +239,11 @@ mod tests {
     impl QuestionSetNotIterator for Refused {}
 
     #[test]
-    fn into_field_gives_a_value_for_each_wrong_kind() {
-        let _: Value<Refused> = ReferenceField.into_field(Refused);
-        let _: Value<Refused> = ResultField.into_field(Refused);
-        let _: Value<Refused> = IteratorField.into_field(Refused);
+    fn into_field_gives_an_empty_question_set_for_each_wrong_kind() {
+        let _: EmptyQuestionSet = ReferenceField.into_field(Refused);
+        let _: EmptyQuestionSet = ResultField.into_field(Refused);
+        let _: EmptyQuestionSet = IteratorField.into_field(Refused);
+        let _: EmptyQuestionSet = DataField.into_field(noul("a"));
         let _: Noul = QuestionSetField.into_field(noul("a"));
     }
 }

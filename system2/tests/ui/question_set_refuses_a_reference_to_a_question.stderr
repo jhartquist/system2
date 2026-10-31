@@ -7,6 +7,7 @@ error[E0277]: `&system2::Noul` is not a question set
   = help: the trait `system2::QuestionSet` is not implemented for `&system2::Noul`
   = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
   = note: to ask a question again, clone it; a reference to a question is not a question set
+  = note: a tag takes other data along, next to the answers: `question_set.tag(data)`
 help: the trait `system2::QuestionSet` is implemented for `system2::Noul`
  --> src/question/noul.rs
   |

@@ -66,7 +66,6 @@ impl ToTokens for Questions {
         let raw_question_set = Ident::new("__raw_question_set", Span::mixed_site());
         let raw_answer_set = Ident::new("__raw_answer_set", Span::mixed_site());
 
-        // the type of each value selects its kind, and a wrong kind fails at the field
         let values = self.fields.iter().map(|field| {
             let value = field.value();
 
@@ -77,8 +76,8 @@ impl ToTokens for Questions {
                 #private::field(#value, |#field_binding| {
                     #[allow(unused_imports)]
                     use #private::{
-                        IteratorKind as _, QuestionSetKind as _, ReferenceKind as _,
-                        ResultKind as _, ValueKind as _,
+                        DataKind as _, IteratorKind as _, QuestionSetKind as _,
+                        ReferenceKind as _, ResultKind as _,
                     };
                     (&&&&&&#private::Probe::of(&#field_binding))
                         .field_kind()
@@ -100,15 +99,17 @@ impl ToTokens for Questions {
                     #(#names: #types),*
                 }
 
-                impl<#(#types: #private::Field),*> ::system2::QuestionSet
+                impl<#(#types: ::system2::QuestionSet),*> ::system2::QuestionSet
                     for Questions<#(#types),*>
                 {
-                    type AnswerSet = Answers<#(<#types as #private::Field>::AnswerSet),*>;
+                    type AnswerSet = Answers<#(#types::AnswerSet),*>;
                 }
 
-                impl<#(#types: #private::Field),*> #private::Sealed for Questions<#(#types),*> {
+                impl<#(#types: ::system2::QuestionSet),*> #private::Sealed
+                    for Questions<#(#types),*>
+                {
                     fn write(&mut self, #raw_question_set: &mut #private::RawQuestionSet) {
-                        #(#private::Field::write(&mut self.#indexes, #raw_question_set);)*
+                        #(#private::Sealed::write(&mut self.#indexes, #raw_question_set);)*
                     }
 
                     fn read(
@@ -119,7 +120,7 @@ impl ToTokens for Questions {
                         ::std::string::String,
                     > {
                         ::core::result::Result::Ok(Answers {
-                            #(#names: #private::Field::read(self.#indexes, #raw_answer_set)?,)*
+                            #(#names: #private::Sealed::read(self.#indexes, #raw_answer_set)?,)*
                         })
                     }
                 }
@@ -170,7 +171,8 @@ mod tests {
 
     #[test]
     fn to_tokens_gives_a_call_with_a_struct_of_questions_and_of_answers() {
-        let questions: Questions = syn::parse2(quote!(buggy: BUGGY, id, tested: TESTED)).unwrap();
+        let questions: Questions =
+            syn::parse2(quote!(buggy: BUGGY, checks, tested: TESTED)).unwrap();
 
         let call: ExprCall = syn::parse2(questions.to_token_stream()).unwrap();
         let callee: ExprParen = syn::parse2(call.func.to_token_stream()).unwrap();
@@ -194,7 +196,7 @@ mod tests {
             .collect();
         let generics = "< F0 , F1 , F2 >".to_owned();
         let types = ["F0", "F1", "F2"].map(str::to_owned).to_vec();
-        let fields = ["buggy : F0", "id : F1", "tested : F2"]
+        let fields = ["buggy : F0", "checks : F1", "tested : F2"]
             .map(str::to_owned)
             .to_vec();
         assert_eq!(

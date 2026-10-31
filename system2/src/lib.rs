@@ -28,8 +28,7 @@ pub mod prelude {
 #[doc(hidden)]
 pub mod __private {
     pub use crate::ask::field::{
-        Field, IteratorKind, Probe, QuestionSetKind, ReferenceKind, ResultKind, Value, ValueKind,
-        field,
+        DataKind, IteratorKind, Probe, QuestionSetKind, ReferenceKind, ResultKind, field,
     };
     pub use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     pub use crate::json::{AlwaysSerialize, Json, is_blank, to_json, unescaped};

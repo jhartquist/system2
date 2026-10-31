@@ -9,5 +9,5 @@ error[E0277]: a field of `questions!` must own its question set, not borrow it
 note: required by a bound in `system2::ask::field::ReferenceField::into_field`
  --> src/ask/field.rs
   |
-  |     pub fn into_field<T: OwnedQuestionSet>(self, field: T) -> Value<T> {
+  |     pub fn into_field<T: OwnedQuestionSet>(self, _field: T) -> EmptyQuestionSet {
   |                          ^^^^^^^^^^^^^^^^ required by this bound in `ReferenceField::into_field`

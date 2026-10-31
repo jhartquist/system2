@@ -8,7 +8,8 @@ use std::array;
     label = "not a question set",
     note = "a question set is a question, a `questions!` set, \
             or a tuple, array, `Vec`, or `Option` of question sets",
-    note = "to ask a question again, clone it; a reference to a question is not a question set"
+    note = "to ask a question again, clone it; a reference to a question is not a question set",
+    note = "a tag takes other data along, next to the answers: `question_set.tag(data)`"
 )]
 pub trait QuestionSet: Sized + Sealed {
     type AnswerSet;

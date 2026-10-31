@@ -9,5 +9,5 @@ error[E0277]: a field of `questions!` must be a question set, not a `Result` of 
 note: required by a bound in `system2::ask::field::ResultField::into_field`
  --> src/ask/field.rs
   |
-  |     pub fn into_field<T: QuestionSetNotResult>(self, field: T) -> Value<T> {
+  |     pub fn into_field<T: QuestionSetNotResult>(self, _field: T) -> EmptyQuestionSet {
   |                          ^^^^^^^^^^^^^^^^^^^^ required by this bound in `ResultField::into_field`

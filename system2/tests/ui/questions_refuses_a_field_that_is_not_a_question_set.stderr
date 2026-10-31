@@ -1,0 +1,140 @@
+error[E0277]: `T` is not a question set
+ --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:7:26
+  |
+7 |     let _ = questions! { question_set };
+  |                          ^^^^^^^^^^^^ not a question set
+  |
+  = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
+  = note: to ask a question again, clone it; a reference to a question is not a question set
+  = note: a tag takes other data along, next to the answers: `question_set.tag(data)`
+note: required by a bound in `system2::ask::field::DataField::into_field`
+ --> src/ask/field.rs
+  |
+  |     pub fn into_field<T: QuestionSet>(self, _field: T) -> EmptyQuestionSet {
+  |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
+help: consider restricting type parameter `T` with trait `QuestionSet`
+  |
+6 | fn generic<T: system2::QuestionSet>(question_set: T) {
+  |             ++++++++++++++++++++++
+
+error[E0277]: `{integer}` is not a question set
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:13:13
+   |
+13 |         id: 7,
+   |             ^ not a question set
+   |
+   = help: the trait `system2::QuestionSet` is not implemented for `{integer}`
+   = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
+   = note: to ask a question again, clone it; a reference to a question is not a question set
+   = note: a tag takes other data along, next to the answers: `question_set.tag(data)`
+   = help: the following other types implement trait `system2::QuestionSet`:
+             (A,)
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and $N others
+note: required by a bound in `system2::ask::field::DataField::into_field`
+  --> src/ask/field.rs
+   |
+   |     pub fn into_field<T: QuestionSet>(self, _field: T) -> EmptyQuestionSet {
+   |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
+
+error[E0277]: `{integer}` is not a question set
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:14:16
+   |
+14 |         count: Some(7),
+   |                ^^^^ not a question set
+   |
+   = help: the trait `system2::QuestionSet` is not implemented for `{integer}`
+   = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
+   = note: to ask a question again, clone it; a reference to a question is not a question set
+   = note: a tag takes other data along, next to the answers: `question_set.tag(data)`
+   = help: the following other types implement trait `system2::QuestionSet`:
+             (A,)
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and $N others
+   = note: required for `Option<{integer}>` to implement `system2::QuestionSet`
+note: required by a bound in `system2::ask::field::DataField::into_field`
+  --> src/ask/field.rs
+   |
+   |     pub fn into_field<T: QuestionSet>(self, _field: T) -> EmptyQuestionSet {
+   |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
+
+error[E0277]: `&&&system2::Noul` is not a question set
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:15:15
+   |
+15 |         deep: &&&BUGGY,
+   |               ^ not a question set
+   |
+   = help: the trait `system2::QuestionSet` is not implemented for `&&&system2::Noul`
+   = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
+   = note: to ask a question again, clone it; a reference to a question is not a question set
+   = note: a tag takes other data along, next to the answers: `question_set.tag(data)`
+help: the trait `system2::QuestionSet` is implemented for `system2::Noul`
+  --> src/question/noul.rs
+   |
+   | impl QuestionSet for Noul {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `system2::ask::field::DataField::into_field`
+  --> src/ask/field.rs
+   |
+   |     pub fn into_field<T: QuestionSet>(self, _field: T) -> EmptyQuestionSet {
+   |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
+
+error[E0277]: `&system2::Noul` is not a question set
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:16:15
+   |
+16 |         list: vec![&BUGGY],
+   |               ^^^ not a question set
+   |
+   = help: the trait `system2::QuestionSet` is not implemented for `&system2::Noul`
+   = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
+   = note: to ask a question again, clone it; a reference to a question is not a question set
+   = note: a tag takes other data along, next to the answers: `question_set.tag(data)`
+help: the trait `system2::QuestionSet` is implemented for `system2::Noul`
+  --> src/question/noul.rs
+   |
+   | impl QuestionSet for Noul {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: required for `Vec<&system2::Noul>` to implement `system2::QuestionSet`
+note: required by a bound in `system2::ask::field::DataField::into_field`
+  --> src/ask/field.rs
+   |
+   |     pub fn into_field<T: QuestionSet>(self, _field: T) -> EmptyQuestionSet {
+   |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
+
+error[E0277]: `std::slice::Iter<'_, system2::Noul>` is not a question set
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:17:19
+   |
+17 |         iterator: nouls.iter(),
+   |                   ^^^^^ not a question set
+   |
+   = help: the trait `system2::QuestionSet` is not implemented for `std::slice::Iter<'_, system2::Noul>`
+   = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
+   = note: to ask a question again, clone it; a reference to a question is not a question set
+   = note: a tag takes other data along, next to the answers: `question_set.tag(data)`
+   = help: the following other types implement trait `system2::QuestionSet`:
+             (A,)
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and $N others
+note: required by a bound in `system2::ask::field::DataField::into_field`
+  --> src/ask/field.rs
+   |
+   |     pub fn into_field<T: QuestionSet>(self, _field: T) -> EmptyQuestionSet {
+   |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`

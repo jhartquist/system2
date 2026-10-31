@@ -2,7 +2,6 @@ mod support;
 
 use serde_json::{Value, json};
 use std::cell::Cell;
-use std::ptr;
 use support::{
     Counted, STATE, answer_set_response, client_for, counted_drops, instructions, mock_api,
     no_request_sent, noul, noul_answer, only_request, request_text,
@@ -168,6 +167,7 @@ enum Problem {
 }
 
 const BUGGY: Noul = noul!("Is there a bug in this code?");
+const TESTED: Noul = noul!("Is the function tested?");
 const PROBLEM: Choice<Problem> = choice!("What is the worst problem in this code?", Problem);
 const SEVERITY: Score<&str> = score!("How severe is it?", ["Cosmetic.", "Data is lost."]);
 
@@ -202,7 +202,6 @@ async fn questions_asks_its_question_sets_in_one_request() {
         &noul_answer(0.3),
     ]))
     .await;
-    let change = Change { id: 7 };
 
     let review = client_for(&server)
         .ask(
@@ -211,7 +210,6 @@ async fn questions_asks_its_question_sets_in_one_request() {
                 problem: PROBLEM,
                 severity: score!("How severe is it?", ["Cosmetic.", "Data is lost."]),
                 style: questions! { idiomatic: noul!("Is the code idiomatic?") },
-                id: change.id,
             },
             STATE,
         )
@@ -222,7 +220,6 @@ async fn questions_asks_its_question_sets_in_one_request() {
     assert_eq!(*review.problem.most_likely(), Problem::Style);
     assert_eq!(*review.severity.most_likely(), "Data is lost.");
     assert_eq!(review.style.idiomatic.probability(), 0.3);
-    assert_eq!(review.id, 7);
     assert_eq!(
         instructions(&only_request(&server).await),
         [
@@ -232,6 +229,29 @@ async fn questions_asks_its_question_sets_in_one_request() {
             "Is the code idiomatic?",
         ]
     );
+}
+
+#[tokio::test]
+async fn questions_takes_data_along_with_a_tag() {
+    let server = mock_api(answer_set_response(&[
+        &noul_answer(0.92),
+        &noul_answer(0.1),
+    ]))
+    .await;
+    let client = client_for(&server);
+    let change = Change { id: 7 };
+
+    let (review, id) = client
+        .ask(
+            questions! { buggy: BUGGY, tested: TESTED }.tag(change.id),
+            STATE,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(review.buggy.probability(), 0.92);
+    assert_eq!(review.tested.probability(), 0.1);
+    assert_eq!(id, 7);
 }
 
 struct Rule {
@@ -329,7 +349,7 @@ async fn questions_evaluates_each_field_one_time_in_order() {
         .ask(
             questions! {
                 buggy: { order.push("buggy"); BUGGY },
-                id: { order.push("id"); 7 },
+                skipped: { order.push("skipped"); None::<Noul> },
                 tested: { order.push("tested"); Some(BUGGY) },
             },
             STATE,
@@ -337,123 +357,57 @@ async fn questions_evaluates_each_field_one_time_in_order() {
         .await
         .unwrap();
 
-    assert_eq!(order, ["buggy", "id", "tested"]);
-    assert_eq!(answers.id, 7);
+    assert_eq!(order, ["buggy", "skipped", "tested"]);
+    assert!(answers.skipped.is_none());
     assert_eq!(instructions(&only_request(&server).await).len(), 2);
 }
 
-#[tokio::test]
-async fn questions_asks_a_field_by_its_type() {
-    let server = mock_api(answer_set_response(&[&noul_answer(0.92)])).await;
-    let text = "change";
-    let mut count = 3_u32;
-
-    let answers = client_for(&server)
-        .ask(
-            questions! {
-                asked: Some(BUGGY),
-                skipped: None::<Noul>,
-                count: Some(count),
-                text: &text,
-                counted: &mut count,
-            },
-            STATE,
-        )
-        .await
-        .unwrap();
-    *answers.counted += 1;
-
-    assert_eq!(answers.asked.unwrap().probability(), 0.92);
-    assert!(answers.skipped.is_none());
-    assert_eq!(answers.count, Some(3));
-    assert_eq!(*answers.text, "change");
-    assert_eq!(count, 4);
-    assert_eq!(instructions(&only_request(&server).await).len(), 1);
-}
-
-#[tokio::test]
-async fn questions_moves_a_value_into_the_answers() {
-    let server = mock_api(answer_set_response(&[&noul_answer(0.92)])).await;
-    let drops = counted_drops();
-
-    let answers = client_for(&server)
-        .ask(questions! { buggy: BUGGY, owner: Counted }, STATE)
-        .await
-        .unwrap();
-    assert_eq!(counted_drops(), drops);
-    drop(answers.owner);
-
-    assert_eq!(counted_drops(), drops + 1);
-}
-
-async fn ask_with_id<Q: QuestionSet>(
+async fn ask_generic<Q: QuestionSet>(
     client: &Client,
     question_set: Q,
-) -> system2::Result<(Q::AnswerSet, u32)> {
-    let answers = client
-        .ask(questions! { question_set, id: 7 }, STATE)
-        .await?;
-    Ok((answers.question_set, answers.id))
-}
-
-#[tokio::test]
-async fn questions_moves_a_reference_it_does_not_check_into_the_answers() {
-    let server = mock_api(answer_set_response(&[])).await;
-    let nouls = [BUGGY];
-    let borrowed = &nouls[0];
-    let borrowed_twice = &borrowed;
-
-    let answers = client_for(&server)
-        .ask(
-            questions! {
-                deep: &borrowed_twice,
-                list: vec![&nouls[0]],
-                option: Some(&nouls[0]),
-                iterator: nouls.iter(),
-            },
-            STATE,
-        )
-        .await
-        .unwrap();
-
-    let deep: &&&Noul = answers.deep;
-    let list: Vec<&Noul> = answers.list;
-    let option: Option<&Noul> = answers.option;
-    let iterated: Vec<&Noul> = answers.iterator.collect();
-    assert!(ptr::eq(*deep, borrowed_twice));
-    assert_eq!(list.len(), 1);
-    assert!(ptr::eq(list[0], borrowed));
-    assert!(option.is_some_and(|noul| ptr::eq(noul, borrowed)));
-    assert_eq!(iterated.len(), 1);
-    assert!(ptr::eq(iterated[0], borrowed));
-    assert!(no_request_sent(&server).await);
+) -> system2::Result<Q::AnswerSet> {
+    let answers = client.ask(questions! { question_set }, STATE).await?;
+    Ok(answers.question_set)
 }
 
 #[tokio::test]
 async fn questions_keeps_a_borrowed_temporary_to_the_end_of_the_statement() {
     let server = mock_api(answer_set_response(&[
-        &noul_answer(0.92),
-        &noul_answer(0.3),
+        &json!({
+            "type": "choice",
+            "choice": "web",
+            "confidence": 1.0,
+            "probabilities": { "web": 1.0 },
+        }),
+        &json!({
+            "type": "choice",
+            "choice": "infra",
+            "confidence": 1.0,
+            "probabilities": { "infra": 1.0 },
+        }),
     ]))
     .await;
 
-    let names = client_for(&server)
+    let teams = client_for(&server)
         .ask(
             questions! {
-                buggy: BUGGY,
-                name: &String::from("change"),
+                team: Choice::new("Which team owns this code?", &[String::from("web")]).unwrap(),
                 style: questions! {
-                    idiomatic: noul!("Is the code idiomatic?"),
-                    name: &String::from("style"),
+                    team: Choice::new("Which team owns the style?", &[String::from("infra")])
+                        .unwrap(),
                 },
             },
             STATE,
         )
         .await
-        .map(|answers| (answers.name.clone(), answers.style.name.clone()))
+        .map(|answers| {
+            let team = answers.team.most_likely().as_str();
+            let style_team = answers.style.team.most_likely().as_str();
+            (team.to_owned(), style_team.to_owned())
+        })
         .unwrap();
 
-    assert_eq!(names, ("change".to_owned(), "style".to_owned()));
+    assert_eq!(teams, ("web".to_owned(), "infra".to_owned()));
     assert_eq!(instructions(&only_request(&server).await).len(), 2);
 }
 
@@ -461,10 +415,9 @@ async fn questions_keeps_a_borrowed_temporary_to_the_end_of_the_statement() {
 async fn questions_asks_a_field_of_a_generic_question_set() {
     let server = mock_api(answer_set_response(&[&noul_answer(0.92)])).await;
 
-    let (buggy, id) = ask_with_id(&client_for(&server), BUGGY).await.unwrap();
+    let buggy = ask_generic(&client_for(&server), BUGGY).await.unwrap();
 
     assert_eq!(buggy.probability(), 0.92);
-    assert_eq!(id, 7);
 }
 
 #[tokio::test]
@@ -472,15 +425,18 @@ async fn questions_keeps_the_names_of_the_caller() {
     // a binding of the expansion with one of these names would match the constant
     #[allow(non_upper_case_globals, reason = "the names of the bindings")]
     mod caller {
-        pub(super) const field: u32 = 1;
-        pub(super) const fields: u32 = 2;
-        pub(super) const raw_question_set: u32 = 3;
-        pub(super) const raw_answer_set: u32 = 4;
+        use system2::Noul;
+
+        pub(super) const field: Option<Noul> = None;
+        pub(super) const fields: Option<Noul> = None;
+        pub(super) const raw_question_set: Option<Noul> = None;
+        pub(super) const raw_answer_set: Option<Noul> = None;
     }
     use caller::{field, fields, raw_answer_set, raw_question_set};
 
     let server = mock_api(answer_set_response(&[
         &noul_answer(0.92),
+        &noul_answer(0.5),
         &noul_answer(0.1),
         &json!({
             "type": "choice",
@@ -490,13 +446,13 @@ async fn questions_keeps_the_names_of_the_caller() {
         }),
     ]))
     .await;
-    let id = 7;
+    let tested = noul("Is the code tested?");
 
     let answers = client_for(&server)
         .ask(
             questions! {
-                id: BUGGY,
-                number: id,
+                tested: BUGGY,
+                checked: tested,
                 review: Questions::<Review>::new(),
                 constants: [field, fields, raw_question_set, raw_answer_set],
             },
@@ -505,23 +461,23 @@ async fn questions_keeps_the_names_of_the_caller() {
         .await
         .unwrap();
 
-    assert_eq!(answers.id.probability(), 0.92);
-    assert_eq!(answers.number, 7);
+    assert_eq!(answers.tested.probability(), 0.92);
+    assert_eq!(answers.checked.probability(), 0.5);
     assert_eq!(answers.review.buggy.probability(), 0.1);
-    assert_eq!(answers.constants, [1, 2, 3, 4]);
+    assert!(answers.constants.iter().all(Option::is_none));
 }
 
 #[tokio::test]
 async fn questions_clones_a_question_set() {
     let server = mock_api(answer_set_response(&[&noul_answer(0.92)])).await;
     let client = client_for(&server);
-    let question_set = questions! { buggy: BUGGY, id: 7 };
+    let question_set = questions! { buggy: BUGGY };
 
     let first = client.ask(question_set.clone(), STATE).await.unwrap();
     let second = client.ask(question_set, STATE).await.unwrap();
 
     assert_eq!(first.buggy.probability(), second.buggy.probability());
-    assert_eq!(first.id, second.id);
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -529,17 +485,17 @@ async fn questions_answers_serialize_clone_and_debug() {
     let server = mock_api(answer_set_response(&[&noul_answer(0.92)])).await;
 
     let answers = client_for(&server)
-        .ask(questions! { buggy: BUGGY, id: 7 }, STATE)
+        .ask(questions! { buggy: BUGGY, skipped: None::<Noul> }, STATE)
         .await
         .unwrap();
 
     assert_eq!(
         serde_json::to_value(answers.clone()).unwrap(),
-        json!({ "buggy": { "probability": 0.92 }, "id": 7 })
+        json!({ "buggy": { "probability": 0.92 }, "skipped": null })
     );
     assert_eq!(
         format!("{answers:?}"),
-        format!("Answers {{ buggy: {:?}, id: 7 }}", answers.buggy)
+        format!("Answers {{ buggy: {:?}, skipped: None }}", answers.buggy)
     );
 }
 
@@ -549,18 +505,16 @@ async fn questions_sends_no_request_for_no_question() {
     let client = client_for(&server);
 
     let empty = client
-        .ask(questions! { checks: Vec::<Noul>::new(), id: 7 }, STATE)
-        .await
-        .unwrap();
-    let values = client
-        .ask(questions! { id: 7, name: "change" }, STATE)
+        .ask(
+            questions! { checks: Vec::<Noul>::new(), skipped: None::<Noul> },
+            STATE,
+        )
         .await
         .unwrap();
     let nothing = client.ask(questions! {}, STATE).await.unwrap();
 
     assert!(empty.checks.is_empty());
-    assert_eq!(empty.id, 7);
-    assert_eq!((values.id, values.name), (7, "change"));
+    assert!(empty.skipped.is_none());
     assert_eq!(serde_json::to_value(nothing).unwrap(), json!({}));
     assert!(no_request_sent(&server).await);
 }
