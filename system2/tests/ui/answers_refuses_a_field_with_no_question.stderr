@@ -1,0 +1,5 @@
+error: the field `tested` must name its question with `#[system2(question = …)]`
+ --> tests/ui/answers_refuses_a_field_with_no_question.rs:9:5
+  |
+9 |     tested: NoulAnswer,
+  |     ^^^^^^

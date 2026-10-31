@@ -1,0 +1,27 @@
+error[E0277]: `String` is not the answers of a named set
+ --> tests/ui/questions_new_refuses_a_type_without_answers.rs:4:13
+  |
+4 |     let _ = Questions::<String>::new();
+  |             ^^^^^^^^^^^^^^^^^^^ not the answers of a named set
+  |
+  = help: the trait `Answers` is not implemented for `String`
+  = note: add `#[derive(Answers)]` to a struct with named fields, then `Questions<String>` asks its questions
+note: required by a bound in `Questions`
+ --> src/ask/questions.rs
+  |
+  | pub struct Questions<A: Answers> {
+  |                         ^^^^^^^ required by this bound in `Questions`
+
+error[E0599]: the associated function or constant `new` exists for struct `Questions<String>`, but its trait bounds were not satisfied
+ --> tests/ui/questions_new_refuses_a_type_without_answers.rs:4:34
+  |
+4 |     let _ = Questions::<String>::new();
+  |                                  ^^^ associated function or constant cannot be called on `Questions<String>` due to unsatisfied trait bounds
+  |
+ ::: $RUST/alloc/src/string.rs
+  |
+  | pub struct String {
+  | ----------------- doesn't satisfy `String: Answers`
+  |
+  = note: the following trait bounds were not satisfied:
+          `String: Answers`

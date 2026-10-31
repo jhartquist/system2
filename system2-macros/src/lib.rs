@@ -1,5 +1,6 @@
 //! The macros of `system2`.
 
+mod answers;
 mod choice;
 mod derive;
 mod json;
@@ -48,6 +49,14 @@ pub fn derive_options(input: TokenStream) -> TokenStream {
 pub fn derive_levels(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     derive::levels(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+#[proc_macro_derive(Answers, attributes(system2))]
+pub fn derive_answers(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    answers::answers(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

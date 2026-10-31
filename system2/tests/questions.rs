@@ -1,59 +1,37 @@
 mod support;
 
 use serde_json::{Value, json};
-use std::cell::Cell;
 use support::{
     Counted, STATE, answer_set_response, client_for, counted_drops, instructions, mock_api,
     no_request_sent, noul, noul_answer, only_request, request_text,
 };
 use system2::prelude::*;
-use system2::{
-    Choice, ChoiceAnswer, Client, NamedAnswerSet, Noul, NoulAnswer, QuestionError, Questions,
-    Score, ScoreAnswer,
-};
+use system2::{Choice, ChoiceAnswer, Client, Noul, NoulAnswer, QuestionError, Score, ScoreAnswer};
 
-struct Review {
-    buggy: NoulAnswer,
-    language: ChoiceAnswer<&'static str>,
-}
-
-impl NamedAnswerSet for Review {
-    type QuestionSet = (Noul, Choice<&'static str>);
-    type AnswerSet = (NoulAnswer, ChoiceAnswer<&'static str>);
-
-    #[expect(
-        clippy::unwrap_used,
-        reason = "`questions!` writes `choice!` here, which never fails"
-    )]
-    fn question_set() -> Self::QuestionSet {
-        let buggy = noul("Is there a bug in this code?");
-        let language = Choice::new("Which language is the code in?", ["rust", "go"]).unwrap();
-        (buggy, language)
-    }
-
-    fn from_answer_set((buggy, language): Self::AnswerSet) -> Self {
-        Review { buggy, language }
-    }
+#[derive(Debug, Answers)]
+pub struct Review {
+    #[system2(question = BUGGY)]
+    pub buggy: NoulAnswer,
+    #[system2(question = noul!("Is the function tested?"))]
+    pub tested: NoulAnswer,
 }
 
 const REVIEW: Questions<Review> = Questions::new();
 
+impl Review {
+    fn is_risky(&self) -> bool {
+        self.buggy.is_likely() && !self.tested.is_likely()
+    }
+}
+
 const REQUEST_TEXT: &str = concat!(
     r#"{"model":"jev-latest","state":"Buy now!","questions":{"#,
     r#""q0":{"type":"noul","instructions":"Is there a bug in this code?"},"#,
-    r#""q1":{"type":"choice","instructions":"Which language is the code in?","criteria":{"rust":null,"go":null}}}}"#,
+    r#""q1":{"type":"noul","instructions":"Is the function tested?"}}}"#,
 );
 
 fn review_response() -> wiremock::ResponseTemplate {
-    answer_set_response(&[
-        &noul_answer(0.92),
-        &json!({
-            "type": "choice",
-            "choice": "go",
-            "confidence": 0.7,
-            "probabilities": { "rust": 0.3, "go": 0.7 },
-        }),
-    ])
+    answer_set_response(&[&noul_answer(0.92), &noul_answer(0.1)])
 }
 
 #[tokio::test]
@@ -63,7 +41,8 @@ async fn ask_sends_a_named_set_in_one_request() {
     let review = client_for(&server).ask(REVIEW, STATE).await.unwrap();
 
     assert_eq!(review.buggy.probability(), 0.92);
-    assert_eq!(*review.language.most_likely(), "go");
+    assert_eq!(review.tested.probability(), 0.1);
+    assert!(review.is_risky());
     assert_eq!(request_text(&only_request(&server).await), REQUEST_TEXT);
 }
 
@@ -95,41 +74,114 @@ async fn ask_makes_the_questions_again_for_each_request() {
     assert_eq!(texts, [REQUEST_TEXT, REQUEST_TEXT]);
 }
 
-thread_local! {
-    static QUESTION_SET_CALLS: Cell<usize> = const { Cell::new(0) };
-}
-
-struct Picks {
-    choice: ChoiceAnswer<Counted>,
-    score: ScoreAnswer<Counted>,
-}
-
-impl NamedAnswerSet for Picks {
-    type QuestionSet = (Choice<Counted>, Score<Counted>);
-    type AnswerSet = (ChoiceAnswer<Counted>, ScoreAnswer<Counted>);
-
-    fn question_set() -> Self::QuestionSet {
-        QUESTION_SET_CALLS.set(QUESTION_SET_CALLS.get() + 1);
-        let choice = choice!("Which one?", [("first", Counted), ("second", Counted)]);
-        let score = score!(
-            "How bad?",
-            [("Nothing breaks.", Counted), ("Data is lost.", Counted)]
-        );
-        (choice, score)
-    }
-
-    fn from_answer_set((choice, score): Self::AnswerSet) -> Self {
-        Picks { choice, score }
-    }
-}
-
-fn calls_and_drops() -> (usize, usize) {
-    let calls = QUESTION_SET_CALLS.get();
-    (calls, counted_drops())
+#[derive(Answers)]
+struct Triage {
+    #[system2(question = Questions::new())]
+    review: Review,
+    #[system2(question = PROBLEM)]
+    problem: ChoiceAnswer<Problem>,
+    #[system2(question = score!("How severe is it?", [("Cosmetic.", 1), ("Data is lost.", 9)]))]
+    severity: ScoreAnswer<u32>,
+    #[system2(question = [BUGGY, TESTED])]
+    checks: [NoulAnswer; 2],
+    #[system2(question = None::<Noul>)]
+    skipped: Option<NoulAnswer>,
+    #[system2(question = TESTED.tag("tested"))]
+    tagged: (NoulAnswer, &'static str),
 }
 
 #[tokio::test]
-async fn ask_keeps_the_values_of_a_named_set_until_their_owner_drops() {
+async fn ask_gives_each_field_the_answers_of_its_question_set() {
+    let server = mock_api(answer_set_response(&[
+        &noul_answer(0.1),
+        &noul_answer(0.2),
+        &problem_answer(),
+        &severity_answer(),
+        &noul_answer(0.3),
+        &noul_answer(0.4),
+        &noul_answer(0.5),
+    ]))
+    .await;
+
+    let triage: Triage = client_for(&server)
+        .ask(Questions::new(), STATE)
+        .await
+        .unwrap();
+
+    assert_eq!(triage.review.buggy.probability(), 0.1);
+    assert_eq!(triage.review.tested.probability(), 0.2);
+    assert_eq!(*triage.problem.most_likely(), Problem::Style);
+    assert_eq!(*triage.severity.most_likely(), 9);
+    assert_eq!(triage.checks.map(|c| c.probability()), [0.3, 0.4]);
+    assert!(triage.skipped.is_none());
+    assert_eq!(triage.tagged.0.probability(), 0.5);
+    assert_eq!(triage.tagged.1, "tested");
+    assert_eq!(instructions(&only_request(&server).await).len(), 7);
+}
+
+#[derive(Answers)]
+struct Wide {
+    #[system2(question = noul!("Is it 0?"))]
+    q0: NoulAnswer,
+    #[system2(question = noul!("Is it 1?"))]
+    q1: NoulAnswer,
+    #[system2(question = noul!("Is it 2?"))]
+    q2: NoulAnswer,
+    #[system2(question = noul!("Is it 3?"))]
+    q3: NoulAnswer,
+    #[system2(question = noul!("Is it 4?"))]
+    q4: NoulAnswer,
+    #[system2(question = noul!("Is it 5?"))]
+    q5: NoulAnswer,
+    #[system2(question = noul!("Is it 6?"))]
+    q6: NoulAnswer,
+    #[system2(question = noul!("Is it 7?"))]
+    q7: NoulAnswer,
+    #[system2(question = noul!("Is it 8?"))]
+    q8: NoulAnswer,
+    #[system2(question = noul!("Is it 9?"))]
+    q9: NoulAnswer,
+    #[system2(question = noul!("Is it 10?"))]
+    q10: NoulAnswer,
+    #[system2(question = noul!("Is it 11?"))]
+    q11: NoulAnswer,
+    #[system2(question = noul!("Is it 12?"))]
+    q12: NoulAnswer,
+}
+
+#[tokio::test]
+async fn ask_takes_a_named_set_of_more_than_12_fields_in_order() {
+    let probabilities: Vec<f64> = (0..13).map(|index| f64::from(index) / 100.0).collect();
+    let answers: Vec<Value> = probabilities.iter().map(|&p| noul_answer(p)).collect();
+    let answers: Vec<&Value> = answers.iter().collect();
+    let server = mock_api(answer_set_response(&answers)).await;
+
+    let wide: Wide = client_for(&server)
+        .ask(Questions::new(), STATE)
+        .await
+        .unwrap();
+
+    let read = [
+        wide.q0, wide.q1, wide.q2, wide.q3, wide.q4, wide.q5, wide.q6, wide.q7, wide.q8, wide.q9,
+        wide.q10, wide.q11, wide.q12,
+    ]
+    .map(|answer| answer.probability());
+    assert_eq!(read.to_vec(), probabilities);
+    let instructions = instructions(&only_request(&server).await);
+    let sent: Vec<String> = (0..13).map(|index| format!("Is it {index}?")).collect();
+    assert_eq!(instructions, sent);
+}
+
+#[derive(Answers)]
+struct Picks {
+    #[system2(question = choice!("Which one?", [("first", Counted), ("second", Counted)]))]
+    choice: ChoiceAnswer<Counted>,
+    #[system2(question = score!("How bad?", [("Nothing breaks.", Counted), ("Data is lost.", Counted)]))]
+    score: ScoreAnswer<Counted>,
+}
+
+#[tokio::test]
+async fn ask_makes_the_values_of_a_named_set_again_for_its_answers() {
     let server = mock_api(answer_set_response(&[
         &json!({
             "type": "choice",
@@ -147,17 +199,18 @@ async fn ask_keeps_the_values_of_a_named_set_until_their_owner_drops() {
     .await;
     let client = client_for(&server);
 
+    // the request drops the values that it sends, so a dropped request holds none
     let cancelled = client.ask(Questions::<Picks>::new(), STATE);
-    assert_eq!(calls_and_drops(), (1, 0));
+    assert_eq!(counted_drops(), 4);
     drop(cancelled);
-    assert_eq!(calls_and_drops(), (1, 4));
+    assert_eq!(counted_drops(), 4);
 
     let Picks { choice, score } = client.ask(Questions::new(), STATE).await.unwrap();
-    assert_eq!(calls_and_drops(), (2, 4));
+    assert_eq!(counted_drops(), 8);
     drop(choice);
-    assert_eq!(calls_and_drops(), (2, 6));
+    assert_eq!(counted_drops(), 10);
     drop(score);
-    assert_eq!(calls_and_drops(), (2, 8));
+    assert_eq!(counted_drops(), 12);
 }
 
 #[derive(Debug, PartialEq, Options)]
@@ -438,12 +491,7 @@ async fn questions_keeps_the_names_of_the_caller() {
         &noul_answer(0.92),
         &noul_answer(0.5),
         &noul_answer(0.1),
-        &json!({
-            "type": "choice",
-            "choice": "rust",
-            "confidence": 0.7,
-            "probabilities": { "rust": 0.7, "go": 0.3 },
-        }),
+        &noul_answer(0.2),
     ]))
     .await;
     let tested = noul("Is the code tested?");

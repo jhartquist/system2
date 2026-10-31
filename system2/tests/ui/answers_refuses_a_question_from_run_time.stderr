@@ -1,0 +1,15 @@
+error[E0015]: cannot call non-const associated function `system2::Noul::new::<&str>` in constants
+ --> tests/ui/answers_refuses_a_question_from_run_time.rs:5:26
+  |
+5 |     #[system2(question = Noul::new("Is there a bug in this code?").unwrap())]
+  |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: calls in constants are limited to constant functions, tuple structs and tuple variants
+
+error[E0015]: cannot call non-const method `Result::<system2::Noul, InvalidNoul>::unwrap` in constants
+ --> tests/ui/answers_refuses_a_question_from_run_time.rs:5:68
+  |
+5 |     #[system2(question = Noul::new("Is there a bug in this code?").unwrap())]
+  |                                                                    ^^^^^^^^
+  |
+  = note: calls in constants are limited to constant functions, tuple structs and tuple variants

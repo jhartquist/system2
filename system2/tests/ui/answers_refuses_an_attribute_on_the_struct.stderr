@@ -1,0 +1,5 @@
+error: `#[system2]` must be on a field, not on the struct
+ --> tests/ui/answers_refuses_an_attribute_on_the_struct.rs:6:1
+  |
+6 | #[system2(question = BUGGY)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: `#[derive(Answers)]` needs a struct with named fields
+ --> tests/ui/answers_refuses_a_tuple_struct.rs:4:8
+  |
+4 | struct Review(NoulAnswer);
+  |        ^^^^^^

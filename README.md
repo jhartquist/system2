@@ -45,12 +45,12 @@ async fn main() -> system2::Result<()> {
   - [x] `Score`
   - [ ] `Bbox`
 - [x] enums as options and levels
-- [ ] question sets
+- [x] question sets
   - [x] tuples
   - [x] `Vec`
   - [x] iterators
   - [x] anonymous sets (`questions! { ... }`)
-  - [ ] named sets (`#[derive(Answers)]`)
+  - [x] named sets (`#[derive(Answers)]`)
   - [x] tags
 - [x] any serializable state
 - [x] compile-time checks for static questions

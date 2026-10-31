@@ -1,68 +1,87 @@
 use super::wire::{RawAnswerSet, RawQuestionSet, Sealed};
 use crate::QuestionSet;
+use std::marker::PhantomData;
 use std::{any, fmt};
 
-pub struct Questions<A: NamedAnswerSet> {
-    question_set: Option<A::QuestionSet>,
+pub struct Questions<A: Answers> {
+    answers: PhantomData<fn() -> A>,
 }
 
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not the answers of a named set",
+    label = "not the answers of a named set",
+    note = "add `#[derive(Answers)]` to a struct with named fields, \
+            then `Questions<{Self}>` asks its questions"
+)]
+pub trait Answers: SealedAnswers {}
+
+// hidden, so a named set comes from the derive with constant questions; a caller can still
+// reach it through `__private`, but the crate supports no implementation by hand
 #[doc(hidden)]
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` is not a named answer set",
-    label = "not a named answer set",
-    note = "define the answers with `questions!(Name {{ … }})`, then `Questions<Name>` asks them"
+    message = "`{Self}` must derive `Answers`, not implement it",
+    label = "an implementation of `Answers` by hand",
+    note = "add `#[derive(Answers)]` to a struct with named fields, \
+            or use `questions! {{ … }}` for other question sets"
 )]
-pub trait NamedAnswerSet: Sized {
-    type QuestionSet: QuestionSet<AnswerSet = Self::AnswerSet>;
+pub trait SealedAnswers: Sized {
     type AnswerSet;
 
-    fn question_set() -> Self::QuestionSet;
+    fn question_set() -> impl QuestionSet<AnswerSet = Self::AnswerSet>;
 
     fn from_answer_set(answer_set: Self::AnswerSet) -> Self;
 }
 
-impl<A: NamedAnswerSet> Questions<A> {
+// ties a question of the derive to the answer of its field, so a wrong question is an error at
+// the question; the opaque type keeps the error of the whole set to the same short message
+#[doc(hidden)]
+pub fn question_set<A, Q: QuestionSet<AnswerSet = A>>(
+    question_set: Q,
+) -> impl QuestionSet<AnswerSet = A> {
+    question_set
+}
+
+impl<A: Answers> Questions<A> {
     #[must_use]
     pub const fn new() -> Self {
-        Questions { question_set: None }
+        let answers = PhantomData;
+        Questions { answers }
     }
 }
 
-impl<A: NamedAnswerSet> QuestionSet for Questions<A> {
+impl<A: Answers> QuestionSet for Questions<A> {
     type AnswerSet = A;
 }
 
-impl<A: NamedAnswerSet> Sealed for Questions<A> {
-    // the set keeps the questions that it sends, so their values go to the answer
+// the derive cannot name the type of the question set, so the set makes its questions again to
+// read the answers; the derive gives constant questions, so they are equal each time
+impl<A: Answers> Sealed for Questions<A> {
     fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
-        let question_set = self.question_set.insert(A::question_set());
-        question_set.write(raw_question_set);
+        A::question_set().write(raw_question_set);
     }
 
     fn read(
         self,
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
-        let question_set = self.question_set.unwrap_or_else(A::question_set);
-        let answer_set = question_set.read(raw_answer_set)?;
+        let answer_set = A::question_set().read(raw_answer_set)?;
         Ok(A::from_answer_set(answer_set))
     }
 }
 
-impl<A: NamedAnswerSet> Default for Questions<A> {
+impl<A: Answers> Default for Questions<A> {
     fn default() -> Self {
         Questions::new()
     }
 }
 
-// a clone makes its questions again when it is asked, so the questions need no `Clone`
-impl<A: NamedAnswerSet> Clone for Questions<A> {
+impl<A: Answers> Clone for Questions<A> {
     fn clone(&self) -> Self {
         Questions::new()
     }
 }
 
-impl<A: NamedAnswerSet> fmt::Debug for Questions<A> {
+impl<A: Answers> fmt::Debug for Questions<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Questions<{}>", any::type_name::<A>())
     }
@@ -70,7 +89,7 @@ impl<A: NamedAnswerSet> fmt::Debug for Questions<A> {
 
 #[cfg(test)]
 mod tests {
-    use super::{NamedAnswerSet, Questions};
+    use super::{Answers, Questions, SealedAnswers};
     use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     use crate::{Noul, NoulAnswer, QuestionSet};
     use serde_json::json;
@@ -80,17 +99,19 @@ mod tests {
         Noul::new(text).unwrap()
     }
 
+    // by hand, as the derive writes it
     #[derive(Debug)]
     struct Review {
         buggy: NoulAnswer,
         tested: Option<NoulAnswer>,
     }
 
-    impl NamedAnswerSet for Review {
-        type QuestionSet = (Noul, Option<Noul>);
+    impl Answers for Review {}
+
+    impl SealedAnswers for Review {
         type AnswerSet = (NoulAnswer, Option<NoulAnswer>);
 
-        fn question_set() -> Self::QuestionSet {
+        fn question_set() -> impl QuestionSet<AnswerSet = Self::AnswerSet> {
             (noul("Is it buggy?"), Some(noul("Is it tested?")))
         }
 
@@ -110,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn write_gives_the_questions_of_the_named_answer_set() {
+    fn write_gives_the_questions_of_the_answers() {
         assert_eq!(
             texts(Questions::<Review>::new()),
             texts(Review::question_set())
@@ -118,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn read_gives_the_named_answer_set() {
+    fn read_gives_the_answers() {
         let answers = vec![
             json!({ "type": "noul", "noul": 0.1 }),
             json!({ "type": "noul", "noul": 0.2 }),
@@ -144,18 +165,29 @@ mod tests {
     }
 
     #[test]
-    fn default_gives_the_questions_of_new() {
+    fn default_and_clone_give_the_questions_of_new() {
+        let question_set = Questions::<Review>::new();
+
         assert_eq!(
-            texts(Questions::<Review>::default()),
+            texts(question_set.clone()),
             texts(Questions::<Review>::new())
+        );
+        assert_eq!(texts(Questions::<Review>::default()), texts(question_set));
+    }
+
+    #[test]
+    fn debug_names_the_answers() {
+        assert_eq!(
+            format!("{:?}", Questions::<Review>::new()),
+            format!("Questions<{}>", any::type_name::<Review>())
         );
     }
 
     #[test]
-    fn debug_names_the_answer_set() {
+    fn question_set_gives_the_question_set_back() {
         assert_eq!(
-            format!("{:?}", Questions::<Review>::new()),
-            format!("Questions<{}>", any::type_name::<Review>())
+            texts(super::question_set(noul("Is it buggy?"))),
+            ["{\"type\":\"noul\",\"instructions\":\"Is it buggy?\"}"]
         );
     }
 }

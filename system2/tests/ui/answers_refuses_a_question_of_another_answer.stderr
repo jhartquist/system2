@@ -1,0 +1,27 @@
+error[E0271]: type mismatch resolving `<Choice<&str> as QuestionSet>::AnswerSet == NoulAnswer`
+ --> tests/ui/answers_refuses_a_question_of_another_answer.rs:5:26
+  |
+5 |     #[system2(question = choice!("Which language is the code in?", ["rust", "go"]))]
+  |                          ^^^^^^ expected `NoulAnswer`, found `ChoiceAnswer<&str>`
+  |
+  = note: expected struct `NoulAnswer`
+             found struct `ChoiceAnswer<&str>`
+note: required by a bound in `system2::__private::question_set`
+ --> src/ask/questions.rs
+  |
+  | pub fn question_set<A, Q: QuestionSet<AnswerSet = A>>(
+  |                                       ^^^^^^^^^^^^^ required by this bound in `question_set`
+
+error[E0271]: type mismatch resolving `<Choice<&str> as QuestionSet>::AnswerSet == NoulAnswer`
+ --> tests/ui/answers_refuses_a_question_of_another_answer.rs:3:10
+  |
+3 | #[derive(Answers)]
+  |          ^^^^^^^ expected `NoulAnswer`, found `ChoiceAnswer<&str>`
+  |
+  = note: expected struct `NoulAnswer`
+             found struct `ChoiceAnswer<&str>`
+note: required by a bound in `system2::__private::question_set`
+ --> src/ask/questions.rs
+  |
+  | pub fn question_set<A, Q: QuestionSet<AnswerSet = A>>(
+  |                                       ^^^^^^^^^^^^^ required by this bound in `question_set`

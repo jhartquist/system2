@@ -1,0 +1,5 @@
+error: a field takes only `question = …`
+ --> tests/ui/answers_refuses_an_unknown_key.rs:5:15
+  |
+5 |     #[system2(rename = "bug")]
+  |               ^^^^^^
