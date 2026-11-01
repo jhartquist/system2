@@ -2,8 +2,8 @@ mod support;
 
 use serde_json::{Value, json};
 use support::{
-    Counted, STATE, answer_set_response, client_for, counted_drops, mock_api, only_request,
-    question_texts, request_body, request_text, response,
+    Counted, STATE, answer_set_response, api_requests, client_for, counted_drops, mock_api,
+    only_request, question_texts, request_body, request_text, response,
 };
 use system2::Score;
 use system2::prelude::*;
@@ -163,10 +163,8 @@ async fn ask_sends_the_descriptions_or_the_names_of_the_derive() {
         .await
         .unwrap();
 
-    let criteria: Vec<_> = server
-        .received_requests()
+    let criteria: Vec<_> = api_requests(&server)
         .await
-        .unwrap()
         .iter()
         .map(|request| request_body(request)["questions"]["q0"]["criteria"].clone())
         .collect();

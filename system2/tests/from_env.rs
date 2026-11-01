@@ -6,12 +6,12 @@ use system2::{AskError, Client, Noul};
 
 #[tokio::test]
 #[expect(unsafe_code, reason = "the test sets the environment")]
-async fn from_env_ignores_empty_variables() {
+async fn from_env_ignores_blank_variables() {
     // SAFETY: this test is alone in its binary, and it starts no thread before this
     unsafe {
         env::set_var("TYPESAFE_API_KEY", "");
-        env::set_var("TYPESAFE_BASE_URL", "");
-        env::set_var("TYPESAFE_DEFAULT_MODEL", "");
+        env::set_var("TYPESAFE_BASE_URL", " ");
+        env::set_var("TYPESAFE_DEFAULT_MODEL", "\n");
     }
 
     let client = Client::from_env();

@@ -1,19 +1,29 @@
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet};
 use crate::{AskError, AskFuture, QuestionSet, json};
 use reqwest::Url;
-use reqwest::header::{CONTENT_ENCODING, CONTENT_TYPE, HeaderMap};
+use reqwest::header::{
+    AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderValue, RETRY_AFTER,
+};
+use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
+use std::hash::{BuildHasher, Hasher, RandomState};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use std::{env, fmt};
 
 const BASE_URL: &str = "https://api.typesafe.ai";
 const MODEL: &str = "jev-latest";
 const TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_RETRIES: u32 = 2;
+const FIRST_BACKOFF: Duration = Duration::from_millis(500);
+const LONGEST_BACKOFF: Duration = Duration::from_secs(5);
+const LONGEST_RETRY_AFTER: Duration = Duration::from_secs(30);
+const JITTER: f64 = 0.25;
 const REQUEST_ID: &str = "x-typesafe-request-id";
+const RETRY_AFTER_MS: &str = "retry-after-ms";
 
 static GLOBAL: Mutex<Option<Client>> = Mutex::new(None);
 
@@ -24,17 +34,29 @@ pub struct Client {
     base_url: String,
     model: String,
     timeout: Duration,
+    max_retries: u32,
 }
 
 impl Client {
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "reqwest fails only when TLS cannot start, and `reqwest::Client::new` panics then"
+    )]
     pub fn new() -> Self {
+        // the api never redirects, and a 301 or 302 turns a post into a get
+        let http = reqwest::Client::builder()
+            .redirect(Policy::none())
+            .build()
+            .expect("TLS starts");
         Client {
-            http: reqwest::Client::new(),
+            http,
             api_key: None,
             base_url: BASE_URL.to_owned(),
             model: MODEL.to_owned(),
             timeout: TIMEOUT,
+            max_retries: MAX_RETRIES,
         }
     }
 
@@ -53,7 +75,7 @@ impl Client {
 
     #[must_use]
     pub fn api_key(self, api_key: impl Into<String>) -> Self {
-        let api_key = Some(api_key.into()).filter(|key| !key.is_empty());
+        let api_key = Some(api_key.into().trim().to_owned()).filter(|key| !key.is_empty());
         Client { api_key, ..self }
     }
 
@@ -72,6 +94,14 @@ impl Client {
     #[must_use]
     pub fn timeout(self, timeout: Duration) -> Self {
         Client { timeout, ..self }
+    }
+
+    #[must_use]
+    pub fn max_retries(self, max_retries: u32) -> Self {
+        Client {
+            max_retries,
+            ..self
+        }
     }
 
     pub fn set_global(self) {
@@ -105,26 +135,73 @@ impl Client {
 
     async fn send(self, body: Vec<u8>) -> Result<Response, AskError> {
         let url = self.endpoint()?;
-        let api_key = self.api_key.as_deref().ok_or(AskError::MissingApiKey)?;
+        let authorization = self.authorization()?;
+        let body = compress(&body);
 
+        let mut retries = 0;
+        loop {
+            let (error, retry_after) = match self.attempt(&url, &authorization, &body).await {
+                Ok(response) => return Ok(response),
+                Err(Failure::Final(error)) => return Err(error),
+                Err(Failure::Retry { error, retry_after }) => (error, retry_after),
+            };
+            if retries == self.max_retries {
+                return Err(error);
+            }
+            let Some(wait) = retry_wait(retry_after, retries) else {
+                return Err(error);
+            };
+            tokio::time::sleep(wait).await;
+            retries += 1;
+        }
+    }
+
+    async fn attempt(
+        &self,
+        url: &Url,
+        authorization: &HeaderValue,
+        body: &[u8],
+    ) -> Result<Response, Failure> {
         let response = self
             .http
-            .post(url)
-            .bearer_auth(api_key)
+            .post(url.clone())
+            .header(AUTHORIZATION, authorization.clone())
             .header(CONTENT_TYPE, "application/json")
             .header(CONTENT_ENCODING, "zstd")
             .timeout(self.timeout)
-            .body(compress(&body))
+            .body(body.to_vec())
             .send()
             .await
-            .map_err(AskError::from_reqwest)?;
+            .map_err(Failure::from_reqwest)?;
         let status = response.status();
         let request_id = request_id(response.headers());
-        let text = response.text().await.map_err(AskError::from_reqwest)?;
-        if !status.is_success() {
-            return Err(AskError::from_status(status, &text, request_id));
+        let retry_after = retry_after(response.headers(), SystemTime::now());
+        let text = match response.text().await {
+            Ok(text) => text,
+            Err(error) if status.is_success() => return Err(Failure::from_reqwest(error)),
+
+            // the status and its headers already tell what failed
+            Err(_) => String::new(),
+        };
+        if status.is_success() {
+            return parse_response(&text, request_id).map_err(Failure::Final);
         }
-        parse_response(&text, request_id)
+        let error = AskError::from_status(status, &text, request_id);
+        match error {
+            AskError::Http {
+                status: 408 | 429 | 500..=599,
+                ..
+            } => Err(Failure::Retry { error, retry_after }),
+            _ => Err(Failure::Final(error)),
+        }
+    }
+
+    fn authorization(&self) -> Result<HeaderValue, AskError> {
+        let api_key = self.api_key.as_deref().ok_or(AskError::MissingApiKey)?;
+        let mut authorization = HeaderValue::try_from(format!("Bearer {api_key}"))
+            .map_err(|_| AskError::InvalidApiKey)?;
+        authorization.set_sensitive(true);
+        Ok(authorization)
     }
 
     #[expect(
@@ -162,6 +239,22 @@ pub(crate) struct Response {
     pub(crate) request_id: Option<String>,
 }
 
+enum Failure {
+    Final(AskError),
+    Retry {
+        error: AskError,
+        retry_after: Option<Duration>,
+    },
+}
+
+impl Failure {
+    fn from_reqwest(error: reqwest::Error) -> Self {
+        let error = AskError::from_reqwest(error);
+        let retry_after = None;
+        Failure::Retry { error, retry_after }
+    }
+}
+
 #[derive(Serialize)]
 struct RequestBody<'a> {
     model: &'a str,
@@ -175,7 +268,8 @@ struct ResponseBody {
 }
 
 fn var(name: &str) -> Option<String> {
-    env::var(name).ok().filter(|value| !value.is_empty())
+    let value = env::var(name).ok()?.trim().to_owned();
+    Some(value).filter(|value| !value.is_empty())
 }
 
 fn lock_global() -> MutexGuard<'static, Option<Client>> {
@@ -203,6 +297,40 @@ fn parse_response(text: &str, request_id: Option<String>) -> Result<Response, As
     })
 }
 
+fn retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Duration> {
+    let header = |name: &str| headers.get(name)?.to_str().ok();
+    let whole_number = |name| header(name)?.parse().ok();
+    let date = || httpdate::parse_http_date(header(RETRY_AFTER.as_str())?).ok();
+    whole_number(RETRY_AFTER_MS)
+        .map(Duration::from_millis)
+        .or_else(|| whole_number(RETRY_AFTER.as_str()).map(Duration::from_secs))
+        .or_else(|| Some(date()?.duration_since(now).unwrap_or_default()))
+}
+
+// none when the server asks for a wait too long to make
+fn retry_wait(retry_after: Option<Duration>, retries: u32) -> Option<Duration> {
+    match retry_after {
+        Some(wait) => (wait <= LONGEST_RETRY_AFTER).then_some(wait),
+        None => Some(jitter(backoff(retries))),
+    }
+}
+
+fn backoff(retries: u32) -> Duration {
+    FIRST_BACKOFF
+        .saturating_mul(2u32.saturating_pow(retries))
+        .min(LONGEST_BACKOFF)
+}
+
+fn jitter(wait: Duration) -> Duration {
+    wait.mul_f64(1.0 - JITTER * random_fraction())
+}
+
+// std has no random function, but each `RandomState` hashes with new keys
+fn random_fraction() -> f64 {
+    let [a, b, c, d, ..] = RandomState::new().build_hasher().finish().to_le_bytes();
+    f64::from(u32::from_le_bytes([a, b, c, d])) / 2f64.powi(32)
+}
+
 #[expect(clippy::expect_used, reason = "zstd fails only when memory runs out")]
 fn compress(body: &[u8]) -> Vec<u8> {
     zstd::bulk::compress(body, zstd::DEFAULT_COMPRESSION_LEVEL).expect("zstd has memory")
@@ -220,13 +348,16 @@ impl fmt::Debug for Client {
             .field("base_url", &self.base_url)
             .field("model", &self.model)
             .field("timeout", &self.timeout)
+            .field("max_retries", &self.max_retries)
             .finish_non_exhaustive()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Client, REQUEST_ID, parse_response, request_id};
+    use super::{
+        Client, REQUEST_ID, backoff, jitter, parse_response, request_id, retry_after, retry_wait,
+    };
     use crate::AskError;
     use crate::ask::wire::RawQuestionSet;
     use reqwest::header::{HeaderMap, HeaderValue};
@@ -349,12 +480,122 @@ mod tests {
     }
 
     #[test]
+    fn api_key_trims_whitespace() {
+        let cases = [(" key\r\n", Some("key")), (" \n", None), ("", None)];
+        for (api_key, trimmed) in cases {
+            let client = Client::new().api_key(api_key);
+
+            assert_eq!(client.api_key.as_deref(), trimmed, "{api_key:?}");
+        }
+    }
+
+    #[test]
+    fn authorization_hides_the_key() {
+        let authorization = Client::new().api_key("secret").authorization().unwrap();
+
+        assert_eq!(authorization, "Bearer secret");
+        assert!(authorization.is_sensitive());
+    }
+
+    #[test]
+    fn retry_after_reads_the_headers() {
+        let now = httpdate::parse_http_date("Sat, 31 Oct 2026 12:00:00 GMT").unwrap();
+        let cases = [
+            (Some("250"), None, Some(Duration::from_millis(250))),
+            (None, Some("3"), Some(Duration::from_secs(3))),
+            (Some("0"), Some("60"), Some(Duration::ZERO)),
+            (Some("1.5"), Some("2"), Some(Duration::from_secs(2))),
+            (None, Some("1.5"), None),
+            (None, Some("-1"), None),
+            (
+                None,
+                Some("Sat, 31 Oct 2026 12:00:03 GMT"),
+                Some(Duration::from_secs(3)),
+            ),
+            (
+                None,
+                Some("Sat, 31 Oct 2026 11:59:00 GMT"),
+                Some(Duration::ZERO),
+            ),
+            (None, Some("soon"), None),
+            (None, None, None),
+        ];
+        for (retry_after_ms, retry_after_secs, expected) in cases {
+            let mut headers = HeaderMap::new();
+            if let Some(value) = retry_after_ms {
+                headers.insert("retry-after-ms", HeaderValue::from_static(value));
+            }
+            if let Some(value) = retry_after_secs {
+                headers.insert("retry-after", HeaderValue::from_static(value));
+            }
+
+            assert_eq!(
+                retry_after(&headers, now),
+                expected,
+                "{retry_after_ms:?}, {retry_after_secs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn retry_wait_takes_a_header_up_to_30_seconds() {
+        let cases = [
+            (Duration::ZERO, Some(Duration::ZERO)),
+            (Duration::from_secs(30), Some(Duration::from_secs(30))),
+            (Duration::from_millis(30_001), None),
+        ];
+        for (wait, expected) in cases {
+            assert_eq!(retry_wait(Some(wait), 0), expected, "{wait:?}");
+        }
+    }
+
+    #[test]
+    fn retry_wait_takes_the_backoff_with_no_header() {
+        for retries in 0..6 {
+            let wait = retry_wait(None, retries).unwrap();
+
+            let backoff = backoff(retries);
+            assert!(
+                wait <= backoff && wait >= backoff * 3 / 4,
+                "{retries}: {wait:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn backoff_doubles_up_to_5_seconds() {
+        let cases = [
+            (0, Duration::from_millis(500)),
+            (1, Duration::from_secs(1)),
+            (2, Duration::from_secs(2)),
+            (3, Duration::from_secs(4)),
+            (4, Duration::from_secs(5)),
+            (u32::MAX, Duration::from_secs(5)),
+        ];
+        for (retries, wait) in cases {
+            assert_eq!(backoff(retries), wait, "{retries}");
+        }
+    }
+
+    #[test]
+    fn jitter_subtracts_a_random_part_up_to_a_quarter() {
+        let waits: Vec<Duration> = (0..1000).map(|_| jitter(Duration::from_secs(4))).collect();
+
+        // a thousand draws reach near each end of the range
+        let shortest = waits.iter().min().unwrap().as_millis();
+        let longest = waits.iter().max().unwrap().as_millis();
+        assert!((3000..3050).contains(&shortest), "{shortest}");
+        assert!((3950..=4000).contains(&longest), "{longest}");
+    }
+
+    #[test]
     fn debug_shows_the_settings_but_not_the_key() {
         let client = Client::new().api_key("secret");
 
         assert_eq!(
             format!("{client:?}"),
-            r#"Client { base_url: "https://api.typesafe.ai", model: "jev-latest", timeout: 10s, .. }"#
+            "Client { base_url: \"https://api.typesafe.ai\", model: \"jev-latest\", \
+             timeout: 10s, max_retries: 2, .. }"
         );
     }
 
@@ -366,5 +607,6 @@ mod tests {
         assert_eq!(client.base_url, "https://api.typesafe.ai");
         assert_eq!(client.model, "jev-latest");
         assert_eq!(client.timeout, Duration::from_secs(10));
+        assert_eq!(client.max_retries, 2);
     }
 }

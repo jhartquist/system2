@@ -1259,6 +1259,7 @@ dependencies = [
 name = "system2"
 version = "0.1.0"
 dependencies = [
+ "httpdate",
  "reqwest",
  "serde",
  "serde_json",

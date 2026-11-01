@@ -6,8 +6,8 @@ use std::error::Error;
 use std::net::TcpListener;
 use std::time::Duration;
 use support::{
-    INSTRUCTIONS, STATE, client_for, mock_api, no_request_sent, noul_response, only_request,
-    request_body,
+    INSTRUCTIONS, STATE, accept_api_request, client_for, mock_api, no_request_sent, noul_response,
+    only_request, request_body,
 };
 use system2::{AskError, Client, InvalidJson, Noul};
 use tokio::io::AsyncReadExt;
@@ -69,11 +69,7 @@ async fn ask_cancels_the_request_when_dropped() {
         .api_key("key")
         .base_url(format!("http://{}", listener.local_addr().unwrap()));
 
-    let received = async {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        socket.read_exact(&mut [0]).await.unwrap();
-        socket
-    };
+    let received = accept_api_request(&listener);
 
     let mut asking = client.ask(Noul::new(INSTRUCTIONS).unwrap(), STATE);
     let mut socket = tokio::select! {
@@ -144,11 +140,31 @@ async fn ask_refuses_a_missing_or_empty_api_key() {
 }
 
 #[tokio::test]
+async fn ask_refuses_a_key_that_is_not_a_header_value() {
+    let server = mock_api(noul_response(0.92)).await;
+
+    let error = client_for(&server)
+        .api_key("first\nsecond")
+        .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AskError::InvalidApiKey));
+    assert_eq!(
+        error.to_string(),
+        "the API key must be a valid HTTP header value: \
+         remove line breaks and other control characters"
+    );
+    assert!(no_request_sent(&server).await);
+}
+
+#[tokio::test]
 async fn ask_stops_at_the_timeout() {
     let server = mock_api(noul_response(0.92).set_delay(Duration::from_millis(500))).await;
 
     let error = client_for(&server)
         .timeout(Duration::from_millis(50))
+        .max_retries(0)
         .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
         .await
         .unwrap_err();
@@ -171,6 +187,7 @@ async fn ask_reports_a_failed_connection() {
     let error = Client::new()
         .api_key("key")
         .base_url(&closed)
+        .max_retries(0)
         .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
         .await
         .unwrap_err();

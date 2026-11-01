@@ -2,8 +2,8 @@ mod support;
 
 use serde_json::{Value, json};
 use support::{
-    Counted, STATE, answer_set_response, client_for, counted_drops, instructions, mock_api,
-    no_request_sent, noul, noul_answer, only_request, request_text,
+    Counted, STATE, answer_set_response, api_requests, client_for, counted_drops, instructions,
+    mock_api, no_request_sent, noul, noul_answer, only_request, request_count, request_text,
 };
 use system2::prelude::*;
 use system2::{Choice, ChoiceAnswer, Client, Noul, NoulAnswer, QuestionError, Score, ScoreAnswer};
@@ -69,7 +69,7 @@ async fn ask_makes_the_questions_again_for_each_request() {
     let second = client.ask(question_set, STATE).await.unwrap();
 
     assert_eq!(first.buggy.probability(), second.buggy.probability());
-    let requests = server.received_requests().await.unwrap();
+    let requests = api_requests(&server).await;
     let texts: Vec<String> = requests.iter().map(request_text).collect();
     assert_eq!(texts, [REQUEST_TEXT, REQUEST_TEXT]);
 }
@@ -525,7 +525,7 @@ async fn questions_clones_a_question_set() {
     let second = client.ask(question_set, STATE).await.unwrap();
 
     assert_eq!(first.buggy.probability(), second.buggy.probability());
-    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    assert_eq!(request_count(&server).await, 2);
 }
 
 #[tokio::test]

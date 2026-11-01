@@ -15,9 +15,9 @@ async fn ask_uses_the_global_client_from_the_environment() {
 
     // SAFETY: this test is alone in its binary, and it starts no thread before this
     unsafe {
-        env::set_var("TYPESAFE_API_KEY", "env-key");
-        env::set_var("TYPESAFE_BASE_URL", base_url);
-        env::set_var("TYPESAFE_DEFAULT_MODEL", "jev-1.14.0");
+        env::set_var("TYPESAFE_API_KEY", " env-key\n");
+        env::set_var("TYPESAFE_BASE_URL", format!("{base_url}\n"));
+        env::set_var("TYPESAFE_DEFAULT_MODEL", "jev-1.14.0\r\n");
     }
     let server = MockServer::builder().listener(listener).start().await;
     mount(&server, noul_response(0.92)).await;

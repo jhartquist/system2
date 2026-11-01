@@ -13,11 +13,13 @@ categories = ["api-bindings", "asynchronous"]
 workspace = true
 
 [dependencies]
+httpdate = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 system2-macros = { version = "0.1.0", path = "../system2-macros" }
 thiserror = "2"
+tokio = { version = "1", features = ["time"] }
 zstd = "0.14"
 
 [dev-dependencies]

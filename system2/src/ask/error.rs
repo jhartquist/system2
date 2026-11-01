@@ -11,6 +11,11 @@ pub enum AskError {
     State(InvalidJson),
     #[error("a request must have an API key: set `TYPESAFE_API_KEY`, or call `Client::api_key`")]
     MissingApiKey,
+    #[error(
+        "the API key must be a valid HTTP header value: \
+         remove line breaks and other control characters"
+    )]
+    InvalidApiKey,
     #[error("the base URL must be an absolute HTTP or HTTPS URL, not `{url}`")]
     InvalidBaseUrl { url: String },
     #[error("the request has too many tokens: use `Client::long_context(true)`")]

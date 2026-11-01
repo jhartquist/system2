@@ -5,7 +5,11 @@ use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use system2::{Client, Noul};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
@@ -129,15 +133,51 @@ pub(crate) fn client_for(server: &MockServer) -> Client {
     Client::new().api_key("key").base_url(server.uri())
 }
 
+// other programs on the machine can probe a new local port, so only requests to the api count
+pub(crate) async fn api_requests(server: &MockServer) -> Vec<Request> {
+    let mut requests = server.received_requests().await.unwrap();
+    requests.retain(|request| request.method == "POST" && request.url.path() == "/v1/systemone");
+    requests
+}
+
+// skips the connections of other programs, as `api_requests` does
+pub(crate) async fn accept_api_request(listener: &TcpListener) -> TcpStream {
+    loop {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut start = [0; 5];
+        if socket.read_exact(&mut start).await.is_ok() && &start == b"POST " {
+            return socket;
+        }
+    }
+}
+
+// a server that sends this start of a response to each request, then closes the connection
+pub(crate) async fn partial_api(partial_response: &'static [u8]) -> (Client, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let connections = Arc::new(AtomicUsize::new(0));
+    let accepted = Arc::clone(&connections);
+    tokio::spawn(async move {
+        loop {
+            let mut socket = accept_api_request(&listener).await;
+            accepted.fetch_add(1, Ordering::SeqCst);
+            socket.write_all(partial_response).await.unwrap();
+        }
+    });
+    let client = Client::new().api_key("key").base_url(base_url);
+    (client, connections)
+}
+
 pub(crate) async fn no_request_sent(server: &MockServer) -> bool {
-    server
-        .received_requests()
-        .await
-        .is_some_and(|requests| requests.is_empty())
+    api_requests(server).await.is_empty()
+}
+
+pub(crate) async fn request_count(server: &MockServer) -> usize {
+    api_requests(server).await.len()
 }
 
 pub(crate) async fn only_request(server: &MockServer) -> Request {
-    let mut requests = server.received_requests().await.unwrap();
+    let mut requests = api_requests(server).await;
     assert_eq!(requests.len(), 1, "expected exactly one request");
     requests.pop().unwrap()
 }
