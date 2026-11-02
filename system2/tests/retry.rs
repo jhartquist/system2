@@ -3,31 +3,15 @@ mod support;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant, SystemTime};
 use support::{
-    INSTRUCTIONS, STATE, client_for, mock_api, noul, noul_response, partial_api, request_count,
+    INSTRUCTIONS, STATE, client_for, mock_api, mock_api_then, noul, noul_response, partial_api,
+    request_count,
 };
 use system2::AskError;
 use tokio::time::{sleep, timeout};
-use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use wiremock::ResponseTemplate;
 
 // the first wait of the backoff, less the most that jitter subtracts
 const SHORTEST_BACKOFF: Duration = Duration::from_millis(375);
-
-async fn mock_api_then(first: ResponseTemplate, then: ResponseTemplate) -> MockServer {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
-        .respond_with(first)
-        .up_to_n_times(1)
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/systemone"))
-        .respond_with(then)
-        .mount(&server)
-        .await;
-    server
-}
 
 fn retry_now(status: u16) -> ResponseTemplate {
     ResponseTemplate::new(status).insert_header("retry-after-ms", "0")

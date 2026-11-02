@@ -40,6 +40,18 @@ pub(crate) async fn mock_api(response: ResponseTemplate) -> MockServer {
     server
 }
 
+pub(crate) async fn mock_api_then(first: ResponseTemplate, then: ResponseTemplate) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/systemone"))
+        .respond_with(first)
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    mount(&server, then).await;
+    server
+}
+
 pub(crate) async fn mount(server: &MockServer, response: impl Respond + 'static) {
     Mock::given(method("POST"))
         .and(path("/v1/systemone"))

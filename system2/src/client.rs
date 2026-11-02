@@ -10,14 +10,16 @@ use serde_json::Value;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher, RandomState};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 use std::{env, fmt};
+use tokio::sync::Semaphore;
 
 const BASE_URL: &str = "https://api.typesafe.ai";
 const MODEL: &str = "jev-latest";
 const TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_RETRIES: u32 = 2;
+const MAX_CONCURRENT_REQUESTS: usize = 8;
 const FIRST_BACKOFF: Duration = Duration::from_millis(500);
 const LONGEST_BACKOFF: Duration = Duration::from_secs(5);
 const LONGEST_RETRY_AFTER: Duration = Duration::from_secs(30);
@@ -35,6 +37,7 @@ pub struct Client {
     model: String,
     timeout: Duration,
     max_retries: u32,
+    limit: Arc<Semaphore>,
 }
 
 impl Client {
@@ -57,6 +60,7 @@ impl Client {
             model: MODEL.to_owned(),
             timeout: TIMEOUT,
             max_retries: MAX_RETRIES,
+            limit: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
         }
     }
 
@@ -104,6 +108,14 @@ impl Client {
         }
     }
 
+    #[must_use]
+    pub fn max_concurrent_requests(self, max_concurrent_requests: usize) -> Self {
+        // a limit of 0 stops all requests, and tokio panics past its most permits
+        let permits = max_concurrent_requests.clamp(1, Semaphore::MAX_PERMITS);
+        let limit = Arc::new(Semaphore::new(permits));
+        Client { limit, ..self }
+    }
+
     pub fn set_global(self) {
         *lock_global() = Some(self);
     }
@@ -133,10 +145,14 @@ impl Client {
         AskFuture::new(question_set, async move { client.send(body?).await })
     }
 
+    #[expect(clippy::expect_used, reason = "the client never closes its limit")]
     async fn send(self, body: Vec<u8>) -> Result<Response, AskError> {
         let url = self.endpoint()?;
         let authorization = self.authorization()?;
         let body = compress(&body);
+
+        // held through the retries, and a drop of the future gives it back
+        let _permit = self.limit.acquire().await.expect("the limit is open");
 
         let mut retries = 0;
         loop {
@@ -364,6 +380,7 @@ mod tests {
     use serde_json::value::RawValue;
     use serde_json::{Value, json};
     use std::time::Duration;
+    use tokio::sync::Semaphore;
 
     #[test]
     fn endpoint_adds_the_path_of_the_api() {
@@ -589,6 +606,20 @@ mod tests {
     }
 
     #[test]
+    fn max_concurrent_requests_permits_at_least_one_request() {
+        let cases = [(0, 1), (4, 4), (usize::MAX, Semaphore::MAX_PERMITS)];
+        for (max_concurrent_requests, permits) in cases {
+            let client = Client::new().max_concurrent_requests(max_concurrent_requests);
+
+            assert_eq!(
+                client.limit.available_permits(),
+                permits,
+                "{max_concurrent_requests}"
+            );
+        }
+    }
+
+    #[test]
     fn debug_shows_the_settings_but_not_the_key() {
         let client = Client::new().api_key("secret");
 
@@ -608,5 +639,6 @@ mod tests {
         assert_eq!(client.model, "jev-latest");
         assert_eq!(client.timeout, Duration::from_secs(10));
         assert_eq!(client.max_retries, 2);
+        assert_eq!(client.limit.available_permits(), 8);
     }
 }
