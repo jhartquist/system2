@@ -41,6 +41,7 @@ impl<Q: QuestionSet> Future for AskFuture<Q> {
         let Response {
             raw_answer_set,
             request_id,
+            pending_line,
         } = ready!(self.request.as_mut().poll(cx))?;
         let question_set = self
             .question_set
@@ -51,8 +52,11 @@ impl<Q: QuestionSet> Future for AskFuture<Q> {
             .map_err(|message| AskError::InvalidResponse {
                 message,
                 request_id,
-            });
-        Poll::Ready(answer_set)
+            })?;
+        if let Some(pending_line) = pending_line {
+            pending_line.write().map_err(AskError::Cache)?;
+        }
+        Poll::Ready(Ok(answer_set))
     }
 }
 

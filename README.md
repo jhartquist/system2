@@ -57,9 +57,9 @@ async fn main() -> system2::Result<()> {
 - [x] run-time checks for dynamic questions
 - [ ] client
   - [x] global client
-  - [ ] retries
-  - [ ] concurrency limit
-  - [ ] cache
+  - [x] retries
+  - [x] concurrency limit
+  - [x] cache
   - [ ] token counts
   - [ ] tracing
 - [ ] images

@@ -15,7 +15,10 @@ pub trait QuestionSet: Sized + Sealed {
     type AnswerSet;
 
     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Self> {
-        Client::global().ask(self, state)
+        match Client::global() {
+            Ok(client) => client.ask(self, state),
+            Err(error) => AskFuture::new(self, async { Err(error) }),
+        }
     }
 
     fn tag<T>(self, tag: T) -> Tagged<Self, T> {

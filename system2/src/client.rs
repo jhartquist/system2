@@ -1,5 +1,8 @@
+mod cache;
+
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet};
 use crate::{AskError, AskFuture, QuestionSet, json};
+use cache::{Cache, PendingLine};
 use reqwest::Url;
 use reqwest::header::{
     AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderValue, RETRY_AFTER,
@@ -10,10 +13,13 @@ use serde_json::Value;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher, RandomState};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 use std::{env, fmt};
 use tokio::sync::Semaphore;
+
+pub use cache::CacheError;
 
 const BASE_URL: &str = "https://api.typesafe.ai";
 const MODEL: &str = "jev-latest";
@@ -38,6 +44,8 @@ pub struct Client {
     timeout: Duration,
     max_retries: u32,
     limit: Arc<Semaphore>,
+    cache: Option<Arc<Cache>>,
+    offline: bool,
 }
 
 impl Client {
@@ -61,6 +69,8 @@ impl Client {
             timeout: TIMEOUT,
             max_retries: MAX_RETRIES,
             limit: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
+            cache: None,
+            offline: false,
         }
     }
 
@@ -116,12 +126,36 @@ impl Client {
         Client { limit, ..self }
     }
 
+    pub fn cache(self, path: impl Into<PathBuf>) -> Result<Self, CacheError> {
+        let cache = Some(Arc::new(Cache::open(path.into())?));
+        Ok(Client { cache, ..self })
+    }
+
+    #[must_use]
+    pub fn offline(self, offline: bool) -> Self {
+        Client { offline, ..self }
+    }
+
     pub fn set_global(self) {
         *lock_global() = Some(self);
     }
 
-    pub(crate) fn global() -> Client {
-        lock_global().get_or_insert_with(Client::from_env).clone()
+    pub(crate) fn global() -> Result<Client, AskError> {
+        let mut global = lock_global();
+        if let Some(client) = global.as_ref() {
+            return Ok(client.clone());
+        }
+        let client = Client::from_global_env().map_err(AskError::Cache)?;
+        Ok(global.insert(client).clone())
+    }
+
+    fn from_global_env() -> Result<Client, CacheError> {
+        let offline = var("SYSTEM2_OFFLINE").as_deref() == Some("1");
+        let client = Client::from_env().offline(offline);
+        match var("SYSTEM2_CACHE") {
+            Some(path) => client.cache(path),
+            None => Ok(client),
+        }
     }
 
     pub fn ask<Q: QuestionSet, S: Serialize + ?Sized>(
@@ -145,11 +179,37 @@ impl Client {
         AskFuture::new(question_set, async move { client.send(body?).await })
     }
 
-    #[expect(clippy::expect_used, reason = "the client never closes its limit")]
+    // answers from the cache when it has the request, otherwise sends the request to the api
     async fn send(self, body: Vec<u8>) -> Result<Response, AskError> {
+        let cache = self
+            .cache
+            .clone()
+            .map(|cache| (cache, cache::sha256(&body)));
+        if let Some((cache, request_sha256)) = &cache
+            && let Some(response) = cache.get(request_sha256)
+        {
+            return read_response(&response, None);
+        }
+        if self.offline {
+            return Err(AskError::Offline);
+        }
+        let (text, request_id) = self.post(&body).await?;
+        let json = parse_json(&text, request_id.as_deref())?;
+        let response = read_response(&json, request_id)?;
+        let pending_line =
+            cache.map(|(cache, request_sha256)| PendingLine::new(cache, request_sha256, json));
+        Ok(Response {
+            pending_line,
+            ..response
+        })
+    }
+
+    // the text and the request ID of the response, after the retries
+    #[expect(clippy::expect_used, reason = "the client never closes its limit")]
+    async fn post(&self, body: &[u8]) -> Result<(String, Option<String>), AskError> {
         let url = self.endpoint()?;
         let authorization = self.authorization()?;
-        let body = compress(&body);
+        let body = compress(body);
 
         // held through the retries, and a drop of the future gives it back
         let _permit = self.limit.acquire().await.expect("the limit is open");
@@ -172,12 +232,13 @@ impl Client {
         }
     }
 
+    // the text and the request ID of a response with a success status
     async fn attempt(
         &self,
         url: &Url,
         authorization: &HeaderValue,
         body: &[u8],
-    ) -> Result<Response, Failure> {
+    ) -> Result<(String, Option<String>), Failure> {
         let response = self
             .http
             .post(url.clone())
@@ -200,7 +261,7 @@ impl Client {
             Err(_) => String::new(),
         };
         if status.is_success() {
-            return parse_response(&text, request_id).map_err(Failure::Final);
+            return Ok((text, request_id));
         }
         let error = AskError::from_status(status, &text, request_id);
         match error {
@@ -253,6 +314,9 @@ impl Client {
 pub(crate) struct Response {
     pub(crate) raw_answer_set: RawAnswerSet,
     pub(crate) request_id: Option<String>,
+
+    // a new response, which `poll` writes to the cache once its answers pass
+    pub(crate) pending_line: Option<PendingLine>,
 }
 
 enum Failure {
@@ -297,19 +361,28 @@ fn request_id(headers: &HeaderMap) -> Option<String> {
     Some(id.to_owned())
 }
 
-fn parse_response(text: &str, request_id: Option<String>) -> Result<Response, AskError> {
-    let invalid = |message| AskError::InvalidResponse {
-        message,
-        request_id: request_id.clone(),
+fn parse_json(text: &str, request_id: Option<&str>) -> Result<Value, AskError> {
+    serde_json::from_str(text).map_err(|error| AskError::InvalidResponse {
+        message: format!("must be JSON: {error}"),
+        request_id: request_id.map(str::to_owned),
+    })
+}
+
+fn read_response(json: &Value, request_id: Option<String>) -> Result<Response, AskError> {
+    let answers = match ResponseBody::deserialize(json) {
+        Ok(response_body) => response_body.answers,
+        Err(error) => {
+            return Err(AskError::InvalidResponse {
+                message: format!("must answer each question: {error}"),
+                request_id,
+            });
+        }
     };
-    let response: Value =
-        serde_json::from_str(text).map_err(|error| invalid(format!("must be JSON: {error}")))?;
-    let response: ResponseBody = serde_json::from_value(response)
-        .map_err(|error| invalid(format!("must answer each question: {error}")))?;
-    let raw_answer_set = RawAnswerSet::new(response.answers);
+    let raw_answer_set = RawAnswerSet::new(answers);
     Ok(Response {
         raw_answer_set,
         request_id,
+        ..Response::default()
     })
 }
 
@@ -365,6 +438,8 @@ impl fmt::Debug for Client {
             .field("model", &self.model)
             .field("timeout", &self.timeout)
             .field("max_retries", &self.max_retries)
+            .field("cache", &self.cache.as_ref().map(|cache| cache.path()))
+            .field("offline", &self.offline)
             .finish_non_exhaustive()
     }
 }
@@ -372,13 +447,15 @@ impl fmt::Debug for Client {
 #[cfg(test)]
 mod tests {
     use super::{
-        Client, REQUEST_ID, backoff, jitter, parse_response, request_id, retry_after, retry_wait,
+        Client, REQUEST_ID, backoff, jitter, parse_json, read_response, request_id, retry_after,
+        retry_wait,
     };
     use crate::AskError;
     use crate::ask::wire::RawQuestionSet;
     use reqwest::header::{HeaderMap, HeaderValue};
     use serde_json::value::RawValue;
     use serde_json::{Value, json};
+    use std::fs;
     use std::time::Duration;
     use tokio::sync::Semaphore;
 
@@ -462,32 +539,32 @@ mod tests {
     }
 
     #[test]
-    fn parse_response_takes_the_answers_and_the_request_id() {
+    fn read_response_takes_the_answers_and_the_request_id() {
         let answer = json!({ "type": "noul", "noul": 0.92 });
-        let text = json!({ "answers": { "q0": answer } }).to_string();
+        let json = json!({ "answers": { "q0": answer } });
 
-        let mut response = parse_response(&text, Some("req_1".to_owned())).unwrap();
+        let mut response = read_response(&json, Some("req_1".to_owned())).unwrap();
 
         assert_eq!(response.raw_answer_set.next::<Value>().unwrap(), answer);
         assert_eq!(response.request_id.as_deref(), Some("req_1"));
     }
 
     #[test]
-    fn parse_response_refuses_text_that_is_not_json() {
-        let error = parse_response("<html>", None).unwrap_err();
+    fn parse_json_refuses_text_that_is_not_json() {
+        let error = parse_json("<html>", Some("req_1")).unwrap_err();
 
         assert!(matches!(error, AskError::InvalidResponse { .. }));
         assert_eq!(
             error.to_string(),
-            "the response must be JSON: expected value at line 1 column 1"
+            "the response must be JSON: expected value at line 1 column 1 (request ID `req_1`)"
         );
     }
 
     #[test]
-    fn parse_response_refuses_a_response_with_no_answers() {
-        let text = json!({ "model": "jev-1.13.0" }).to_string();
+    fn read_response_refuses_a_response_with_no_answers() {
+        let json = json!({ "model": "jev-1.13.0" });
 
-        let error = parse_response(&text, Some("req_1".to_owned())).unwrap_err();
+        let error = read_response(&json, Some("req_1".to_owned())).unwrap_err();
 
         assert!(matches!(error, AskError::InvalidResponse { .. }));
         assert_eq!(
@@ -621,13 +698,24 @@ mod tests {
 
     #[test]
     fn debug_shows_the_settings_but_not_the_key() {
-        let client = Client::new().api_key("secret");
+        let path = std::env::temp_dir().join(format!("system2_debug_{}", std::process::id()));
+        let cached = Client::new().cache(&path).unwrap().offline(true);
+        let cases = [
+            (Client::new(), "None".to_owned(), false),
+            (cached, format!("Some({path:?})"), true),
+        ];
+        for (client, cache, offline) in cases {
+            let client = client.api_key("secret");
 
-        assert_eq!(
-            format!("{client:?}"),
-            "Client { base_url: \"https://api.typesafe.ai\", model: \"jev-latest\", \
-             timeout: 10s, max_retries: 2, .. }"
-        );
+            assert_eq!(
+                format!("{client:?}"),
+                format!(
+                    "Client {{ base_url: \"https://api.typesafe.ai\", model: \"jev-latest\", \
+                     timeout: 10s, max_retries: 2, cache: {cache}, offline: {offline}, .. }}"
+                )
+            );
+        }
+        fs::remove_file(&path).unwrap();
     }
 
     #[test]

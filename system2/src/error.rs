@@ -1,4 +1,4 @@
-use crate::{AskError, InvalidChoice, InvalidNoul, InvalidScore, QuestionError};
+use crate::{AskError, CacheError, InvalidChoice, InvalidNoul, InvalidScore, QuestionError};
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -7,6 +7,8 @@ pub enum Error {
     Question(#[from] QuestionError),
     #[error(transparent)]
     Ask(#[from] AskError),
+    #[error(transparent)]
+    Cache(#[from] CacheError),
 }
 
 impl From<InvalidNoul> for Error {

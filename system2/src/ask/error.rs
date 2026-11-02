@@ -1,4 +1,4 @@
-use crate::InvalidJson;
+use crate::{CacheError, InvalidJson};
 use reqwest::StatusCode;
 use serde_json::Value;
 
@@ -18,6 +18,11 @@ pub enum AskError {
     InvalidApiKey,
     #[error("the base URL must be an absolute HTTP or HTTPS URL, not `{url}`")]
     InvalidBaseUrl { url: String },
+    #[error(
+        "the cache has no response for the request, and the client is offline: \
+         set `SYSTEM2_CACHE` or call `Client::cache`, and record the response with a run online"
+    )]
+    Offline,
     #[error("the request has too many tokens: use `Client::long_context(true)`")]
     TokenLimit,
     #[error("the response must arrive within the timeout: raise it with `Client::timeout`")]
@@ -38,6 +43,8 @@ pub enum AskError {
         message: String,
         request_id: Option<String>,
     },
+    #[error(transparent)]
+    Cache(CacheError),
 }
 
 impl AskError {

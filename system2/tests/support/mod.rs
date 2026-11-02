@@ -3,8 +3,11 @@
 
 use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use system2::{Client, Noul};
@@ -121,16 +124,20 @@ pub(crate) fn response(answer: &Value) -> ResponseTemplate {
 }
 
 pub(crate) fn answer_set_response(answers: &[&Value]) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(answer_set_body(answers))
+}
+
+pub(crate) fn answer_set_body(answers: &[&Value]) -> Value {
     let answers: Map<String, Value> = answers
         .iter()
         .enumerate()
         .map(|(index, &answer)| (format!("q{index}"), answer.clone()))
         .collect();
-    ResponseTemplate::new(200).set_body_json(json!({
+    json!({
         "model": "jev-1.13.0",
         "answers": answers,
         "usage": { "input_tokens": 280, "output_tokens": 1 },
-    }))
+    })
 }
 
 pub(crate) fn noul_answer(probability: f64) -> Value {
@@ -226,4 +233,36 @@ pub(crate) fn question_texts(request: &Request) -> Vec<String> {
     (0..body.questions.len())
         .map(|index| body.questions[&format!("q{index}")].get().to_owned())
         .collect()
+}
+
+// a path for a cache file of this name, with no file there yet
+pub(crate) fn cache_path(name: &str) -> PathBuf {
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join("caches");
+    fs::create_dir_all(&folder).unwrap();
+    let path = folder.join(format!("{name}.jsonl"));
+    let _ = fs::remove_file(&path);
+    path
+}
+
+pub(crate) fn cache_lines(path: &Path) -> Vec<Value> {
+    fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+pub(crate) fn sha256_hex(text: &str) -> String {
+    hex::encode(Sha256::digest(text))
+}
+
+// a line of a cache file: a noul about this state, and its response
+pub(crate) fn noul_cache_line(state: &str, response: &Value) -> String {
+    let state = json!(state);
+    let instructions = json!(INSTRUCTIONS);
+    let request = format!(
+        r#"{{"model":"jev-latest","state":{state},"questions":{{"q0":{{"type":"noul","instructions":{instructions}}}}}}}"#
+    );
+    let line = json!({ "request_sha256": sha256_hex(&request), "response": response });
+    format!("{line}\n")
 }

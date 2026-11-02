@@ -11,7 +11,7 @@ mod json;
 mod question;
 
 pub use ask::{Answers, AskError, AskFuture, AskIterator, QuestionSet, Questions, Tagged};
-pub use client::Client;
+pub use client::{CacheError, Client};
 pub use error::{Error, Result};
 pub use json::InvalidJson;
 pub use question::{
