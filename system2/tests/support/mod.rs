@@ -174,6 +174,13 @@ pub(crate) async fn partial_api(partial_response: &'static [u8]) -> (Client, Arc
             let mut socket = accept_api_request(&listener).await;
             accepted.fetch_add(1, Ordering::SeqCst);
             socket.write_all(partial_response).await.unwrap();
+
+            // windows resets a socket that closes with unread data, and the reset can reach the
+            // client before the response, so close the write side and read the rest
+            tokio::spawn(async move {
+                let _ = socket.shutdown().await;
+                let _ = socket.read_to_end(&mut Vec::new()).await;
+            });
         }
     });
     let client = Client::new().api_key("key").base_url(base_url);
