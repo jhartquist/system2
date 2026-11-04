@@ -1,5 +1,5 @@
 use super::wire::{RawAnswerSet, RawQuestionSet, Sealed};
-use crate::{AskFuture, AskWithReceiptFuture, Client, Tagged};
+use crate::{AskError, AskFuture, AskWithReceiptFuture, Client, Tagged};
 use serde::Serialize;
 use std::array;
 
@@ -17,7 +17,7 @@ pub trait QuestionSet: Sized + Sealed {
     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Self> {
         match Client::global() {
             Ok(client) => client.ask(self, state),
-            Err(error) => AskFuture::new(self, async { Err(error) }),
+            Err(error) => AskFuture::new(self, async { Err(AskError::from_env_error(error)) }),
         }
     }
 

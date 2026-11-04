@@ -5,18 +5,18 @@ use serde::Serialize;
 use serde_json::json;
 use std::env;
 use system2::prelude::*;
-use system2::{AskError, CacheError, Choice, Client, Score};
+use system2::{AskError, Choice, Client, Score};
 
 const RECORDING: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/live.jsonl");
 
-fn live() -> Client {
-    Client::from_env().model("jev-1.14.0")
+fn live() -> system2::Result<Client> {
+    Ok(Client::from_env()?.model("jev-1.14.0"))
 }
 
 // offline unless asked, so a changed request fails, and calls no paid api
-fn replay() -> Result<Client, CacheError> {
+fn replay() -> system2::Result<Client> {
     let record = env::var("SYSTEM2_RECORD").as_deref() == Ok("1");
-    live().offline(!record).cache(RECORDING)
+    Ok(live()?.offline(!record).cache(RECORDING)?)
 }
 
 #[tokio::test]
@@ -143,7 +143,7 @@ async fn ask_takes_json_in_each_slot() -> system2::Result<()> {
 #[tokio::test]
 #[ignore = "needs TYPESAFE_API_KEY"]
 async fn ask_with_receipt_tells_the_version_the_tokens_and_the_request_id() {
-    let client = live().model("jev-latest");
+    let client = live().unwrap().model("jev-latest");
 
     let (_, receipt) = client
         .ask_with_receipt(noul!("Is this message spam?"), "Buy now!")
@@ -166,6 +166,7 @@ async fn ask_reports_the_token_limit() {
     let state = "word ".repeat(40_000);
 
     let error = live()
+        .unwrap()
         .ask(noul!("Is the text long?"), &state)
         .await
         .unwrap_err();
@@ -177,6 +178,7 @@ async fn ask_reports_the_token_limit() {
 #[ignore = "needs TYPESAFE_API_KEY"]
 async fn ask_reports_an_unknown_model() {
     let error = live()
+        .unwrap()
         .model("jev-1.14")
         .ask(noul!("Is this message spam?"), "Buy now!")
         .await

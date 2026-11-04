@@ -12,15 +12,18 @@ async fn from_env_ignores_blank_variables() {
         env::set_var("TYPESAFE_API_KEY", "");
         env::set_var("TYPESAFE_BASE_URL", " ");
         env::set_var("TYPESAFE_DEFAULT_MODEL", "\n");
+        env::set_var("SYSTEM2_CACHE", " ");
+        env::set_var("SYSTEM2_OFFLINE", "");
     }
 
-    let client = Client::from_env();
+    let client = Client::from_env().unwrap();
 
     let error = client
         .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
         .await
         .unwrap_err();
     assert!(matches!(error, AskError::MissingApiKey));
+    assert!(format!("{client:?}").contains("cache: None, offline: false"));
 
     let server = mock_api(noul_response(0.92)).await;
     client

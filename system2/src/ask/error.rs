@@ -1,4 +1,4 @@
-use crate::{CacheError, InvalidJson};
+use crate::{CacheError, EnvError, InvalidJson};
 use reqwest::StatusCode;
 use serde_json::Value;
 
@@ -68,6 +68,15 @@ impl AskError {
             AskError::Timeout
         } else {
             AskError::Transport(Box::new(error))
+        }
+    }
+
+    // the same variant as a bad value from a builder method, which `ask` refuses
+    pub(crate) fn from_env_error(error: EnvError) -> Self {
+        match error {
+            EnvError::InvalidApiKey => AskError::InvalidApiKey,
+            EnvError::InvalidBaseUrl { url } => AskError::InvalidBaseUrl { url },
+            EnvError::Cache(error) => AskError::Cache(error),
         }
     }
 }

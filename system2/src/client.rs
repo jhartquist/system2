@@ -76,17 +76,31 @@ impl Client {
         }
     }
 
-    #[must_use]
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self, EnvError> {
         let api_key = var("TYPESAFE_API_KEY");
+        if let Some(api_key) = &api_key
+            && authorization_for(api_key).is_none()
+        {
+            return Err(EnvError::InvalidApiKey);
+        }
         let base_url = var("TYPESAFE_BASE_URL").unwrap_or_else(|| BASE_URL.to_owned());
+        if endpoint_for(&base_url).is_none() {
+            return Err(EnvError::InvalidBaseUrl { url: base_url });
+        }
         let model = var("TYPESAFE_DEFAULT_MODEL").unwrap_or_else(|| MODEL.to_owned());
-        Client {
+        let offline = var("SYSTEM2_OFFLINE").as_deref() == Some("1");
+        let cache = match var("SYSTEM2_CACHE") {
+            Some(path) => Some(Arc::new(Cache::open(path.into()).map_err(EnvError::Cache)?)),
+            None => None,
+        };
+        Ok(Client {
             api_key,
             base_url,
             model,
+            cache,
+            offline,
             ..Client::new()
-        }
+        })
     }
 
     #[must_use]
@@ -147,22 +161,13 @@ impl Client {
         *lock_global() = Some(self);
     }
 
-    pub(crate) fn global() -> Result<Client, AskError> {
+    pub(crate) fn global() -> Result<Client, EnvError> {
         let mut global = lock_global();
         if let Some(client) = global.as_ref() {
             return Ok(client.clone());
         }
-        let client = Client::from_global_env().map_err(AskError::Cache)?;
+        let client = Client::from_env()?;
         Ok(global.insert(client).clone())
-    }
-
-    fn from_global_env() -> Result<Client, CacheError> {
-        let offline = var("SYSTEM2_OFFLINE").as_deref() == Some("1");
-        let client = Client::from_env().offline(offline);
-        match var("SYSTEM2_CACHE") {
-            Some(path) => client.cache(path),
-            None => Ok(client),
-        }
     }
 
     pub fn ask<Q: QuestionSet, S: Serialize + ?Sized>(
@@ -332,10 +337,7 @@ impl Client {
 
     fn authorization(&self) -> Result<HeaderValue, AskError> {
         let api_key = self.api_key.as_deref().ok_or(AskError::MissingApiKey)?;
-        let mut authorization = HeaderValue::try_from(format!("Bearer {api_key}"))
-            .map_err(|_| AskError::InvalidApiKey)?;
-        authorization.set_sensitive(true);
-        Ok(authorization)
+        authorization_for(api_key).ok_or(AskError::InvalidApiKey)
     }
 
     #[expect(
@@ -353,18 +355,24 @@ impl Client {
     }
 
     fn endpoint(&self) -> Result<Url, AskError> {
-        let mut url = Url::parse(&self.base_url)
-            .ok()
-            .filter(|url| matches!(url.scheme(), "http" | "https"))
-            .ok_or_else(|| AskError::InvalidBaseUrl {
-                url: self.base_url.clone(),
-            })?;
-
-        // a proxy can serve the api under a path of its own
-        let path = format!("{}/v1/systemone", url.path().trim_end_matches('/'));
-        url.set_path(&path);
-        Ok(url)
+        endpoint_for(&self.base_url).ok_or_else(|| AskError::InvalidBaseUrl {
+            url: self.base_url.clone(),
+        })
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum EnvError {
+    #[error(
+        "`TYPESAFE_API_KEY` must be a valid HTTP header value: \
+         remove line breaks and other control characters"
+    )]
+    InvalidApiKey,
+    #[error("`TYPESAFE_BASE_URL` must be an absolute HTTP or HTTPS URL, not `{url}`")]
+    InvalidBaseUrl { url: String },
+    #[error(transparent)]
+    Cache(CacheError),
 }
 
 #[derive(Debug)]
@@ -430,6 +438,25 @@ fn var(name: &str) -> Option<String> {
 
 fn lock_global() -> MutexGuard<'static, Option<Client>> {
     GLOBAL.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+// the header of a key, or none for a key that the http library cannot send
+fn authorization_for(api_key: &str) -> Option<HeaderValue> {
+    let mut authorization = HeaderValue::try_from(format!("Bearer {api_key}")).ok()?;
+    authorization.set_sensitive(true);
+    Some(authorization)
+}
+
+// the url of the api, or none for a base url that is not absolute http or https
+fn endpoint_for(base_url: &str) -> Option<Url> {
+    let mut url = Url::parse(base_url)
+        .ok()
+        .filter(|url| matches!(url.scheme(), "http" | "https"))?;
+
+    // a proxy can serve the api under a path of its own
+    let path = format!("{}/v1/systemone", url.path().trim_end_matches('/'));
+    url.set_path(&path);
+    Some(url)
 }
 
 fn request_id(headers: &HeaderMap) -> Option<String> {
