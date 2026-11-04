@@ -10,7 +10,10 @@ mod error;
 mod json;
 mod question;
 
-pub use ask::{Answers, AskError, AskFuture, AskIterator, QuestionSet, Questions, Tagged};
+pub use ask::{
+    Answers, AskError, AskFuture, AskIterator, AskWithReceiptFuture, QuestionSet, Questions,
+    Receipt, Tagged, Usage,
+};
 pub use client::{CacheError, Client};
 pub use error::{Error, Result};
 pub use json::InvalidJson;

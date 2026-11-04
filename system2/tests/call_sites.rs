@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use support::{AnswerByType, client_for, mount};
 use system2::prelude::*;
-use system2::{Choice, Noul, NoulAnswer, QuestionError, Score, Tagged};
+use system2::{Choice, Client, Noul, NoulAnswer, QuestionError, Score, Tagged, Usage};
 use tokio::task::JoinSet;
 use wiremock::MockServer;
 
@@ -18,7 +18,8 @@ const CODE: &str = "fn add(a: i32, b: i32) -> i32 { a - b }";
 async fn ask_runs_each_call_site_as_written() -> system2::Result<()> {
     let server = MockServer::start().await;
     mount(&server, AnswerByType).await;
-    client_for(&server).set_global();
+    let client = client_for(&server);
+    client.clone().set_global();
 
     one_question(CODE).await?;
     questions_the_compiler_checks(CODE).await?;
@@ -29,7 +30,8 @@ async fn ask_runs_each_call_site_as_written() -> system2::Result<()> {
     sets_with_names(CODE).await?;
     states(CODE).await?;
     an_answer_and_its_question(CODE).await?;
-    decisions(CODE).await
+    decisions(CODE).await?;
+    receipts_and_usage(&client, CODE).await
 }
 
 async fn one_question(code: &str) -> system2::Result<()> {
@@ -536,5 +538,32 @@ async fn decisions(code: &str) -> system2::Result<()> {
     }
     urgent_ids.sort_unstable();
     assert_eq!(urgent_ids, [1, 2]);
+    Ok(())
+}
+
+async fn receipts_and_usage(client: &Client, code: &str) -> system2::Result<()> {
+    let budget = 1_000_000;
+    let mut over_budget = false;
+
+    let ((buggy, tested), receipt) = (BUGGY, TESTED).ask_with_receipt(code).await?;
+    let Usage {
+        input_tokens,
+        output_tokens,
+        ..
+    } = receipt.usage;
+    println!(
+        "{input_tokens} in, {output_tokens} out, {:?}, {}",
+        receipt.model, receipt.cached
+    );
+    println!("{:?}, request {:?}", receipt.latency, receipt.request_id);
+    let (review, receipt) = client.ask_with_receipt(REVIEW, code).await?;
+
+    if client.usage().input_tokens > budget {
+        over_budget = true;
+    }
+    assert!(buggy.is_likely() && tested.is_likely() && !review.is_risky());
+    assert_eq!((input_tokens, output_tokens), (280, 1));
+    assert_eq!(receipt.model.as_deref(), Some("jev-1.13.0"));
+    assert!(!over_budget);
     Ok(())
 }

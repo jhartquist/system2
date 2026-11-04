@@ -1,5 +1,5 @@
 use super::wire::{RawAnswerSet, RawQuestionSet, Sealed};
-use crate::{AskFuture, Client, Tagged};
+use crate::{AskFuture, AskWithReceiptFuture, Client, Tagged};
 use serde::Serialize;
 use std::array;
 
@@ -21,6 +21,10 @@ pub trait QuestionSet: Sized + Sealed {
         }
     }
 
+    fn ask_with_receipt<S: Serialize + ?Sized>(self, state: &S) -> AskWithReceiptFuture<Self> {
+        AskWithReceiptFuture::new(self.ask(state))
+    }
+
     fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
@@ -32,6 +36,16 @@ pub trait AskIterator: Iterator + Sized {
         Self::Item: QuestionSet,
     {
         QuestionSet::ask(self.collect::<Vec<_>>(), state)
+    }
+
+    fn ask_with_receipt<S: Serialize + ?Sized>(
+        self,
+        state: &S,
+    ) -> AskWithReceiptFuture<Vec<Self::Item>>
+    where
+        Self::Item: QuestionSet,
+    {
+        QuestionSet::ask_with_receipt(self.collect::<Vec<_>>(), state)
     }
 }
 

@@ -60,7 +60,7 @@ async fn main() -> system2::Result<()> {
   - [x] retries
   - [x] concurrency limit
   - [x] cache
-  - [ ] token counts
+  - [x] token counts
   - [ ] tracing
 - [ ] images
 - [ ] docs

@@ -1,7 +1,7 @@
 mod cache;
 
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet};
-use crate::{AskError, AskFuture, QuestionSet, json};
+use crate::{AskError, AskFuture, AskWithReceiptFuture, QuestionSet, Receipt, Usage, json};
 use cache::{Cache, PendingLine};
 use reqwest::Url;
 use reqwest::header::{
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use std::{env, fmt};
 use tokio::sync::Semaphore;
 
@@ -46,6 +46,7 @@ pub struct Client {
     limit: Arc<Semaphore>,
     cache: Option<Arc<Cache>>,
     offline: bool,
+    usage: Arc<Mutex<Usage>>,
 }
 
 impl Client {
@@ -71,6 +72,7 @@ impl Client {
             limit: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
             cache: None,
             offline: false,
+            usage: Arc::default(),
         }
     }
 
@@ -136,6 +138,11 @@ impl Client {
         Client { offline, ..self }
     }
 
+    #[must_use]
+    pub fn usage(&self) -> Usage {
+        *self.lock_usage()
+    }
+
     pub fn set_global(self) {
         *lock_global() = Some(self);
     }
@@ -169,7 +176,7 @@ impl Client {
         if raw_question_set.is_empty() {
             return AskFuture::new(question_set, async move {
                 state?; // a bad state is an error, even with no questions
-                Ok(Response::default())
+                Ok(Response::without_request())
             });
         }
 
@@ -179,34 +186,72 @@ impl Client {
         AskFuture::new(question_set, async move { client.send(body?).await })
     }
 
+    pub fn ask_with_receipt<Q: QuestionSet, S: Serialize + ?Sized>(
+        &self,
+        question_set: Q,
+        state: &S,
+    ) -> AskWithReceiptFuture<Q> {
+        AskWithReceiptFuture::new(self.ask(question_set, state))
+    }
+
     // answers from the cache when it has the request, otherwise sends the request to the api
     async fn send(self, body: Vec<u8>) -> Result<Response, AskError> {
         let cache = self
             .cache
             .clone()
             .map(|cache| (cache, cache::sha256(&body)));
+
         if let Some((cache, request_sha256)) = &cache
             && let Some(response) = cache.get(request_sha256)
         {
-            return read_response(&response, None);
+            let ResponseBody { model, answers } = read_response(&response, None)?;
+
+            // the tokens were spent when the response went into the cache
+            let receipt = Receipt {
+                model,
+                usage: Usage::default(),
+                cached: true,
+                latency: Duration::ZERO,
+                request_id: None,
+            };
+            return Ok(Response {
+                raw_answer_set: RawAnswerSet::new(answers),
+                receipt,
+                pending_line: None,
+            });
         }
+
         if self.offline {
             return Err(AskError::Offline);
         }
-        let (text, request_id) = self.post(&body).await?;
+
+        let (text, request_id, latency) = self.post(&body).await?;
         let json = parse_json(&text, request_id.as_deref())?;
-        let response = read_response(&json, request_id)?;
+        let usage = read_usage(&json, request_id.as_deref())?;
+
+        // before the answers are read, as a response with bad answers still spends its tokens
+        self.add_usage(usage);
+
+        let ResponseBody { model, answers } = read_response(&json, request_id.as_deref())?;
+        let receipt = Receipt {
+            model,
+            usage,
+            cached: false,
+            latency,
+            request_id,
+        };
         let pending_line =
             cache.map(|(cache, request_sha256)| PendingLine::new(cache, request_sha256, json));
         Ok(Response {
+            raw_answer_set: RawAnswerSet::new(answers),
+            receipt,
             pending_line,
-            ..response
         })
     }
 
-    // the text and the request ID of the response, after the retries
+    // the text, the request ID, and the latency of the response, after the retries
     #[expect(clippy::expect_used, reason = "the client never closes its limit")]
-    async fn post(&self, body: &[u8]) -> Result<(String, Option<String>), AskError> {
+    async fn post(&self, body: &[u8]) -> Result<(String, Option<String>, Duration), AskError> {
         let url = self.endpoint()?;
         let authorization = self.authorization()?;
         let body = compress(body);
@@ -214,10 +259,12 @@ impl Client {
         // held through the retries, and a drop of the future gives it back
         let _permit = self.limit.acquire().await.expect("the limit is open");
 
+        // from the first send, so a wait for the limit is not latency
+        let started = Instant::now();
         let mut retries = 0;
         loop {
             let (error, retry_after) = match self.attempt(&url, &authorization, &body).await {
-                Ok(response) => return Ok(response),
+                Ok((text, request_id)) => return Ok((text, request_id, started.elapsed())),
                 Err(Failure::Final(error)) => return Err(error),
                 Err(Failure::Retry { error, retry_after }) => (error, retry_after),
             };
@@ -273,6 +320,16 @@ impl Client {
         }
     }
 
+    fn add_usage(&self, usage: Usage) {
+        let mut total = self.lock_usage();
+        total.input_tokens = total.input_tokens.saturating_add(usage.input_tokens);
+        total.output_tokens = total.output_tokens.saturating_add(usage.output_tokens);
+    }
+
+    fn lock_usage(&self) -> MutexGuard<'_, Usage> {
+        self.usage.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn authorization(&self) -> Result<HeaderValue, AskError> {
         let api_key = self.api_key.as_deref().ok_or(AskError::MissingApiKey)?;
         let mut authorization = HeaderValue::try_from(format!("Bearer {api_key}"))
@@ -310,13 +367,31 @@ impl Client {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Response {
     pub(crate) raw_answer_set: RawAnswerSet,
-    pub(crate) request_id: Option<String>,
+    pub(crate) receipt: Receipt,
 
     // a new response, which `poll` writes to the cache once its answers pass
     pub(crate) pending_line: Option<PendingLine>,
+}
+
+impl Response {
+    // a set with no questions sends no request, so nothing answers it
+    fn without_request() -> Self {
+        let receipt = Receipt {
+            model: None,
+            usage: Usage::default(),
+            cached: false,
+            latency: Duration::ZERO,
+            request_id: None,
+        };
+        Response {
+            raw_answer_set: RawAnswerSet::default(),
+            receipt,
+            pending_line: None,
+        }
+    }
 }
 
 enum Failure {
@@ -342,8 +417,9 @@ struct RequestBody<'a> {
     questions: &'a RawQuestionSet,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct ResponseBody {
+    model: Option<String>,
     answers: HashMap<String, Value>,
 }
 
@@ -368,21 +444,41 @@ fn parse_json(text: &str, request_id: Option<&str>) -> Result<Value, AskError> {
     })
 }
 
-fn read_response(json: &Value, request_id: Option<String>) -> Result<Response, AskError> {
-    let answers = match ResponseBody::deserialize(json) {
-        Ok(response_body) => response_body.answers,
-        Err(error) => {
-            return Err(AskError::InvalidResponse {
-                message: format!("must answer each question: {error}"),
-                request_id,
-            });
+fn read_response(json: &Value, request_id: Option<&str>) -> Result<ResponseBody, AskError> {
+    ResponseBody::deserialize(json).map_err(|error| AskError::InvalidResponse {
+        message: format!("must have the shape of the API: {error}"),
+        request_id: request_id.map(str::to_owned),
+    })
+}
+
+// by hand, as a derived `Deserialize` takes an array for a struct; null is the same as no value
+fn read_usage(json: &Value, request_id: Option<&str>) -> Result<Usage, AskError> {
+    let invalid = |message| AskError::InvalidResponse {
+        message,
+        request_id: request_id.map(str::to_owned),
+    };
+    let counts = match &json["usage"] {
+        Value::Null => return Ok(Usage::default()),
+        Value::Object(counts) => counts,
+        other => {
+            return Err(invalid(format!(
+                "must give `usage` as an object of token counts, not `{other}`"
+            )));
         }
     };
-    let raw_answer_set = RawAnswerSet::new(answers);
-    Ok(Response {
-        raw_answer_set,
-        request_id,
-        ..Response::default()
+    let count = |key: &str| match counts.get(key) {
+        None | Some(Value::Null) => Ok(0),
+        Some(count) => count.as_u64().ok_or_else(|| {
+            invalid(format!(
+                "must give `{key}` as a whole number of tokens, not `{count}`"
+            ))
+        }),
+    };
+    let input_tokens = count("input_tokens")?;
+    let output_tokens = count("output_tokens")?;
+    Ok(Usage {
+        input_tokens,
+        output_tokens,
     })
 }
 
@@ -447,14 +543,14 @@ impl fmt::Debug for Client {
 #[cfg(test)]
 mod tests {
     use super::{
-        Client, REQUEST_ID, backoff, jitter, parse_json, read_response, request_id, retry_after,
-        retry_wait,
+        Client, REQUEST_ID, ResponseBody, backoff, jitter, parse_json, read_response, read_usage,
+        request_id, retry_after, retry_wait,
     };
     use crate::AskError;
     use crate::ask::wire::RawQuestionSet;
     use reqwest::header::{HeaderMap, HeaderValue};
+    use serde_json::json;
     use serde_json::value::RawValue;
-    use serde_json::{Value, json};
     use std::fs;
     use std::time::Duration;
     use tokio::sync::Semaphore;
@@ -539,14 +635,22 @@ mod tests {
     }
 
     #[test]
-    fn read_response_takes_the_answers_and_the_request_id() {
+    fn read_response_takes_the_answers_and_the_model() {
         let answer = json!({ "type": "noul", "noul": 0.92 });
-        let json = json!({ "answers": { "q0": answer } });
+        let cases = [
+            (json!("jev-1.13.0"), Some("jev-1.13.0")),
+            (json!(null), None),
+        ];
+        for (model, expected) in cases {
+            let json = json!({ "model": model, "answers": { "q0": answer } });
 
-        let mut response = read_response(&json, Some("req_1".to_owned())).unwrap();
+            let ResponseBody { model, answers } = read_response(&json, None).unwrap();
 
-        assert_eq!(response.raw_answer_set.next::<Value>().unwrap(), answer);
-        assert_eq!(response.request_id.as_deref(), Some("req_1"));
+            assert_eq!(answers["q0"], answer);
+            assert_eq!(model.as_deref(), expected);
+        }
+        let ResponseBody { model, .. } = read_response(&json!({ "answers": {} }), None).unwrap();
+        assert_eq!(model, None);
     }
 
     #[test]
@@ -564,13 +668,73 @@ mod tests {
     fn read_response_refuses_a_response_with_no_answers() {
         let json = json!({ "model": "jev-1.13.0" });
 
-        let error = read_response(&json, Some("req_1".to_owned())).unwrap_err();
+        let error = read_response(&json, Some("req_1")).unwrap_err();
 
         assert!(matches!(error, AskError::InvalidResponse { .. }));
         assert_eq!(
             error.to_string(),
-            "the response must answer each question: missing field `answers` (request ID `req_1`)"
+            "the response must have the shape of the API: \
+             missing field `answers` (request ID `req_1`)"
         );
+    }
+
+    #[test]
+    fn read_usage_counts_missing_tokens_as_zero() {
+        let cases = [
+            (json!({}), (0, 0)),
+            (json!({ "usage": null }), (0, 0)),
+            (json!({ "usage": {} }), (0, 0)),
+            (json!({ "usage": { "input_tokens": 280 } }), (280, 0)),
+            (json!({ "usage": { "output_tokens": 1 } }), (0, 1)),
+            (
+                json!({ "usage": { "input_tokens": null, "output_tokens": 1 } }),
+                (0, 1),
+            ),
+            (
+                json!({ "usage": { "input_tokens": 280, "output_tokens": 1 } }),
+                (280, 1),
+            ),
+        ];
+        for (json, expected) in cases {
+            let usage = read_usage(&json, None).unwrap();
+
+            assert_eq!(
+                (usage.input_tokens, usage.output_tokens),
+                expected,
+                "{json}"
+            );
+        }
+    }
+
+    #[test]
+    fn read_usage_refuses_tokens_of_the_wrong_type() {
+        let cases = [
+            (
+                json!("280"),
+                "must give `usage` as an object of token counts, not `\"280\"`",
+            ),
+            (
+                json!([280, 1]),
+                "must give `usage` as an object of token counts, not `[280,1]`",
+            ),
+            (
+                json!({ "input_tokens": -1 }),
+                "must give `input_tokens` as a whole number of tokens, not `-1`",
+            ),
+            (
+                json!({ "output_tokens": 1.5 }),
+                "must give `output_tokens` as a whole number of tokens, not `1.5`",
+            ),
+        ];
+        for (usage, message) in cases {
+            let error = read_usage(&json!({ "usage": usage }), Some("req_1")).unwrap_err();
+
+            assert!(matches!(error, AskError::InvalidResponse { .. }));
+            assert_eq!(
+                error.to_string(),
+                format!("the response {message} (request ID `req_1`)")
+            );
+        }
     }
 
     #[test]

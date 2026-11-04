@@ -75,7 +75,7 @@ async fn ask_checks_an_answer_from_the_cache() {
         ),
         (
             json!({ "model": "jev-1.13.0" }),
-            "the response must answer each question: missing field `answers`",
+            "the response must have the shape of the API: missing field `answers`",
         ),
     ];
     for (response, message) in cases {

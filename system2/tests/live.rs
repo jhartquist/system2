@@ -138,7 +138,26 @@ async fn ask_takes_json_in_each_slot() -> system2::Result<()> {
     Ok(())
 }
 
-// the cache keeps no refusals, so these need the api
+// the cache keeps no refusals, and gives no tokens or request ID, so these need the api
+
+#[tokio::test]
+#[ignore = "needs TYPESAFE_API_KEY"]
+async fn ask_with_receipt_tells_the_version_the_tokens_and_the_request_id() {
+    let client = live().model("jev-latest");
+
+    let (_, receipt) = client
+        .ask_with_receipt(noul!("Is this message spam?"), "Buy now!")
+        .await
+        .unwrap();
+
+    let model = receipt.model.unwrap();
+    assert!(model.starts_with("jev-1."), "{model}");
+
+    // each request costs 259 tokens, plus the state and the question
+    assert!(receipt.usage.input_tokens > 259, "{:?}", receipt.usage);
+    assert!(receipt.request_id.is_some());
+    assert_eq!(client.usage(), receipt.usage);
+}
 
 #[tokio::test]
 #[ignore = "needs TYPESAFE_API_KEY"]
