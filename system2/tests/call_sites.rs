@@ -18,8 +18,7 @@ const CODE: &str = "fn add(a: i32, b: i32) -> i32 { a - b }";
 async fn ask_runs_each_call_site_as_written() -> system2::Result<()> {
     let server = MockServer::start().await;
     mount(&server, AnswerByType).await;
-    let client = client_for(&server);
-    client.clone().set_global();
+    let client = client_for(&server).set_global();
 
     one_question(CODE).await?;
     questions_the_compiler_checks(CODE).await?;
@@ -561,9 +560,11 @@ async fn receipts_and_usage(client: &Client, code: &str) -> system2::Result<()> 
     if client.usage().input_tokens > budget {
         over_budget = true;
     }
+    let usage = Client::global()?.usage();
     assert!(buggy.is_likely() && tested.is_likely() && !review.is_risky());
     assert_eq!((input_tokens, output_tokens), (280, 1));
     assert_eq!(receipt.model.as_deref(), Some("jev-1.13.0"));
     assert!(!over_budget);
+    assert_eq!(usage, client.usage());
     Ok(())
 }

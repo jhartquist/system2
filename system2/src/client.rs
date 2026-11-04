@@ -157,11 +157,16 @@ impl Client {
         *self.lock_usage()
     }
 
-    pub fn set_global(self) {
-        *lock_global() = Some(self);
+    #[expect(
+        clippy::must_use_candidate,
+        clippy::return_self_not_must_use,
+        reason = "a caller can set the global client and drop the clone"
+    )]
+    pub fn set_global(self) -> Client {
+        lock_global().insert(self).clone()
     }
 
-    pub(crate) fn global() -> Result<Client, EnvError> {
+    pub fn global() -> Result<Client, EnvError> {
         let mut global = lock_global();
         if let Some(client) = global.as_ref() {
             return Ok(client.clone());

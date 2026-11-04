@@ -251,8 +251,7 @@ async fn usage_adds_nothing_for_a_dropped_request() {
 #[tokio::test]
 async fn ask_with_receipt_uses_the_global_client() {
     let server = mock_api(answer_set_response(&[&noul_answer(0.1), &noul_answer(0.9)])).await;
-    let client = client_for(&server);
-    client.clone().set_global();
+    let client = client_for(&server).set_global();
     let texts = ["spam", "urgent"];
 
     let ((spam, urgent), set_receipt) = (noul("Is it spam?"), noul("Is it urgent?"))

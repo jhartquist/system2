@@ -3,7 +3,7 @@ mod support;
 use std::{env, fs};
 use support::{INSTRUCTIONS, STATE, cache_path, noul};
 use system2::prelude::*;
-use system2::{AskError, CacheError, NoulAnswer};
+use system2::{AskError, CacheError, Client, EnvError, NoulAnswer};
 
 #[expect(unsafe_code, reason = "the test sets the environment")]
 fn set_var(name: &str, value: &str) {
@@ -30,6 +30,12 @@ async fn ask_makes_the_global_client_again_after_a_bad_variable() {
         set_var(name, "");
     }
     set_var("SYSTEM2_OFFLINE", "0");
+
+    set_var("TYPESAFE_API_KEY", "first\nsecond");
+    let global = Client::global().unwrap_err();
+    set_var("TYPESAFE_API_KEY", "");
+
+    assert!(matches!(global, EnvError::InvalidApiKey), "{global:?}");
 
     let key = ask_with("TYPESAFE_API_KEY", "first\nsecond")
         .await
