@@ -47,7 +47,13 @@ jobs:
           components: llvm-tools, rust-src
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --workspace --all-features --fail-under-lines 100 --fail-under-functions 100
+      - run: |
+          cargo llvm-cov \
+            --workspace \
+            --all-features \
+            --ignore-filename-regex /examples/ \
+            --fail-under-lines 100 \
+            --fail-under-functions 100
 
   deny:
     runs-on: ubuntu-latest

@@ -67,6 +67,9 @@ async fn main() -> system2::Result<()> {
   - [ ] rustdoc
   - [ ] examples
   - [ ] cookbook ports
+    - [x] `citation_check`
+    - [ ] `hierarchical_classification`
+    - [ ] `function_calling`
 - [ ] publish 0.1 on crates.io
 
 ## License
