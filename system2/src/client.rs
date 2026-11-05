@@ -16,8 +16,10 @@ use std::hash::{BuildHasher, Hasher, RandomState};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
-use std::{env, fmt};
+use std::{env, fmt, future};
 use tokio::sync::Semaphore;
+use tracing::field::Empty;
+use tracing::{Instrument, Span, debug, info_span, trace, warn};
 
 pub use cache::CacheError;
 
@@ -46,6 +48,7 @@ pub struct Client {
     limit: Arc<Semaphore>,
     cache: Option<Arc<Cache>>,
     offline: bool,
+    trace_bodies: bool,
     usage: Arc<Mutex<Usage>>,
 }
 
@@ -72,6 +75,7 @@ impl Client {
             limit: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
             cache: None,
             offline: false,
+            trace_bodies: false,
             usage: Arc::default(),
         }
     }
@@ -153,6 +157,14 @@ impl Client {
     }
 
     #[must_use]
+    pub fn trace_bodies(self, trace_bodies: bool) -> Self {
+        Client {
+            trace_bodies,
+            ..self
+        }
+    }
+
+    #[must_use]
     pub fn usage(&self) -> Usage {
         *self.lock_usage()
     }
@@ -191,9 +203,27 @@ impl Client {
         }
 
         // serialize now, so the future does not borrow the state
-        let body = state.map(|state| self.request_body(&raw_question_set, &state));
-        let client = self.clone();
-        AskFuture::new(question_set, async move { client.send(body?).await })
+        let body = match state {
+            Ok(state) => self.request_body(&raw_question_set, &state),
+            Err(error) => return AskFuture::new(question_set, future::ready(Err(error))),
+        };
+        let request_sha256 = cache::sha256(body.as_bytes());
+        let span = info_span!(
+            "ask",
+            gen_ai.provider.name = "typesafe",
+            gen_ai.operation.name = "systemone",
+            gen_ai.request.model = self.model,
+            system2.question_count = raw_question_set.len(),
+            system2.request_sha256 = hex::encode(request_sha256),
+            gen_ai.response.model = Empty,
+            gen_ai.usage.input_tokens = Empty,
+            gen_ai.usage.output_tokens = Empty,
+            system2.cached = Empty,
+            system2.latency_ms = Empty,
+            system2.request_id = Empty,
+        );
+        let request = self.clone().send(body, request_sha256).instrument(span);
+        AskFuture::new(question_set, request)
     }
 
     pub fn ask_with_receipt<Q: QuestionSet, S: Serialize + ?Sized>(
@@ -205,14 +235,13 @@ impl Client {
     }
 
     // answers from the cache when it has the request, otherwise sends the request to the api
-    async fn send(self, body: Vec<u8>) -> Result<Response, AskError> {
-        let cache = self
-            .cache
-            .clone()
-            .map(|cache| (cache, cache::sha256(&body)));
+    async fn send(self, body: String, request_sha256: [u8; 32]) -> Result<Response, AskError> {
+        if self.trace_bodies {
+            trace!(target: "system2::body", { system2.body = body }, "body");
+        }
 
-        if let Some((cache, request_sha256)) = &cache
-            && let Some(response) = cache.get(request_sha256)
+        if let Some(cache) = &self.cache
+            && let Some(response) = cache.get(&request_sha256)
         {
             let ResponseBody { model, answers } = read_response(&response, None)?;
 
@@ -224,6 +253,7 @@ impl Client {
                 latency: Duration::ZERO,
                 request_id: None,
             };
+            record(&receipt);
             return Ok(Response {
                 raw_answer_set: RawAnswerSet::new(answers),
                 receipt,
@@ -235,7 +265,7 @@ impl Client {
             return Err(AskError::Offline);
         }
 
-        let (text, request_id, latency) = self.post(&body).await?;
+        let (text, request_id, latency) = self.post(body.as_bytes()).await?;
         let json = parse_json(&text, request_id.as_deref())?;
         let usage = read_usage(&json, request_id.as_deref())?;
 
@@ -250,8 +280,10 @@ impl Client {
             latency,
             request_id,
         };
-        let pending_line =
-            cache.map(|(cache, request_sha256)| PendingLine::new(cache, request_sha256, json));
+        record(&receipt);
+        let pending_line = self
+            .cache
+            .map(|cache| PendingLine::new(cache, request_sha256, json));
         Ok(Response {
             raw_answer_set: RawAnswerSet::new(answers),
             receipt,
@@ -273,30 +305,56 @@ impl Client {
         let started = Instant::now();
         let mut retries = 0;
         loop {
-            let (error, retry_after) = match self.attempt(&url, &authorization, &body).await {
-                Ok((text, request_id)) => return Ok((text, request_id, started.elapsed())),
-                Err(Failure::Final(error)) => return Err(error),
-                Err(Failure::Retry { error, retry_after }) => (error, retry_after),
+            let attempt = retries + 1;
+            let attempt_started = Instant::now();
+            let (status, result) = self.attempt(&url, &authorization, &body).await;
+            let time_ms = millis(attempt_started.elapsed());
+            let (error, wait) = match result {
+                Ok((text, request_id)) => {
+                    debug!(
+                        system2.attempt = attempt,
+                        http.response.status_code = status,
+                        system2.time_ms = time_ms,
+                        "attempt"
+                    );
+                    return Ok((text, request_id, started.elapsed()));
+                }
+                Err(Failure::Retry { error, retry_after }) if retries < self.max_retries => {
+                    (error, retry_wait(retry_after, retries))
+                }
+                Err(Failure::Final(error) | Failure::Retry { error, .. }) => (error, None),
             };
-            if retries == self.max_retries {
-                return Err(error);
-            }
-            let Some(wait) = retry_wait(retry_after, retries) else {
+            let Some(wait) = wait else {
+                debug!(
+                    system2.attempt = attempt,
+                    http.response.status_code = status,
+                    system2.time_ms = time_ms,
+                    system2.error = %error,
+                    "attempt"
+                );
                 return Err(error);
             };
+            warn!(
+                system2.attempt = attempt,
+                http.response.status_code = status,
+                system2.time_ms = time_ms,
+                system2.error = %error,
+                system2.wait_ms = millis(wait),
+                "retry"
+            );
             tokio::time::sleep(wait).await;
             retries += 1;
         }
     }
 
-    // the text and the request ID of a response with a success status
+    // the status of the response, if one came, and the result of the attempt
     async fn attempt(
         &self,
         url: &Url,
         authorization: &HeaderValue,
         body: &[u8],
-    ) -> Result<(String, Option<String>), Failure> {
-        let response = self
+    ) -> (Option<u16>, Result<(String, Option<String>), Failure>) {
+        let sent = self
             .http
             .post(url.clone())
             .header(AUTHORIZATION, authorization.clone())
@@ -305,28 +363,13 @@ impl Client {
             .timeout(self.timeout)
             .body(body.to_vec())
             .send()
-            .await
-            .map_err(Failure::from_reqwest)?;
-        let status = response.status();
-        let request_id = request_id(response.headers());
-        let retry_after = retry_after(response.headers(), SystemTime::now());
-        let text = match response.text().await {
-            Ok(text) => text,
-            Err(error) if status.is_success() => return Err(Failure::from_reqwest(error)),
-
-            // the status and its headers already tell what failed
-            Err(_) => String::new(),
-        };
-        if status.is_success() {
-            return Ok((text, request_id));
-        }
-        let error = AskError::from_status(status, &text, request_id);
-        match error {
-            AskError::Http {
-                status: 408 | 429 | 500..=599,
-                ..
-            } => Err(Failure::Retry { error, retry_after }),
-            _ => Err(Failure::Final(error)),
+            .await;
+        match sent {
+            Ok(response) => (
+                Some(response.status().as_u16()),
+                read_success(response).await,
+            ),
+            Err(error) => (None, Err(Failure::from_reqwest(error))),
         }
     }
 
@@ -349,9 +392,9 @@ impl Client {
         clippy::expect_used,
         reason = "each part is validated json or text, with text keys"
     )]
-    fn request_body(&self, raw_question_set: &RawQuestionSet, state: &RawValue) -> Vec<u8> {
+    fn request_body(&self, raw_question_set: &RawQuestionSet, state: &RawValue) -> String {
         let model = &self.model;
-        serde_json::to_vec(&RequestBody {
+        serde_json::to_string(&RequestBody {
             model,
             state,
             questions: raw_question_set,
@@ -464,6 +507,31 @@ fn endpoint_for(base_url: &str) -> Option<Url> {
     Some(url)
 }
 
+// the text and the request ID of a response with a success status
+async fn read_success(response: reqwest::Response) -> Result<(String, Option<String>), Failure> {
+    let status = response.status();
+    let request_id = request_id(response.headers());
+    let retry_after = retry_after(response.headers(), SystemTime::now());
+    let text = match response.text().await {
+        Ok(text) => text,
+        Err(error) if status.is_success() => return Err(Failure::from_reqwest(error)),
+
+        // the status and its headers already tell what failed
+        Err(_) => String::new(),
+    };
+    if status.is_success() {
+        return Ok((text, request_id));
+    }
+    let error = AskError::from_status(status, &text, request_id);
+    match error {
+        AskError::Http {
+            status: 408 | 429 | 500..=599,
+            ..
+        } => Err(Failure::Retry { error, retry_after }),
+        _ => Err(Failure::Final(error)),
+    }
+}
+
 fn request_id(headers: &HeaderMap) -> Option<String> {
     let id = headers.get(REQUEST_ID)?.to_str().ok()?;
     Some(id.to_owned())
@@ -512,6 +580,21 @@ fn read_usage(json: &Value, request_id: Option<&str>) -> Result<Usage, AskError>
         input_tokens,
         output_tokens,
     })
+}
+
+// writes the receipt into the `ask` span of the request
+fn record(receipt: &Receipt) {
+    let span = Span::current();
+    span.record("gen_ai.response.model", receipt.model.as_deref());
+    span.record("gen_ai.usage.input_tokens", receipt.usage.input_tokens);
+    span.record("gen_ai.usage.output_tokens", receipt.usage.output_tokens);
+    span.record("system2.cached", receipt.cached);
+    span.record("system2.latency_ms", millis(receipt.latency));
+    span.record("system2.request_id", receipt.request_id.as_deref());
+}
+
+fn millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn retry_after(headers: &HeaderMap, now: SystemTime) -> Option<Duration> {
@@ -568,6 +651,7 @@ impl fmt::Debug for Client {
             .field("max_retries", &self.max_retries)
             .field("cache", &self.cache.as_ref().map(|cache| cache.path()))
             .field("offline", &self.offline)
+            .field("trace_bodies", &self.trace_bodies)
             .finish_non_exhaustive()
     }
 }
@@ -636,7 +720,7 @@ mod tests {
         let state = raw(r#"{"text":"Buy now!","from":"a"}"#);
 
         assert_eq!(
-            String::from_utf8(client.request_body(&raw_question_set, &state)).unwrap(),
+            client.request_body(&raw_question_set, &state),
             concat!(
                 r#"{"model":"jev-1.14.0","state":{"text":"Buy now!","from":"a"},"#,
                 r#""questions":{"q0":{"type":"noul","instructions":"Is it spam?"}}}"#,
@@ -907,7 +991,8 @@ mod tests {
                 format!("{client:?}"),
                 format!(
                     "Client {{ base_url: \"https://api.typesafe.ai\", model: \"jev-latest\", \
-                     timeout: 10s, max_retries: 2, cache: {cache}, offline: {offline}, .. }}"
+                     timeout: 10s, max_retries: 2, cache: {cache}, offline: {offline}, \
+                     trace_bodies: false, .. }}"
                 )
             );
         }
@@ -924,5 +1009,6 @@ mod tests {
         assert_eq!(client.timeout, Duration::from_secs(10));
         assert_eq!(client.max_retries, 2);
         assert_eq!(client.limit.available_permits(), 8);
+        assert!(!client.trace_bodies);
     }
 }

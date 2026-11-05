@@ -30,6 +30,10 @@ impl RawQuestionSet {
         self.questions.push(question);
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.questions.len()
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.questions.is_empty()
     }

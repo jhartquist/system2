@@ -61,7 +61,7 @@ async fn main() -> system2::Result<()> {
   - [x] concurrency limit
   - [x] cache
   - [x] token counts
-  - [ ] tracing
+  - [x] tracing
 - [ ] images
 - [ ] docs
   - [ ] rustdoc
