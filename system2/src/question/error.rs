@@ -1,4 +1,4 @@
-use crate::{InvalidChoice, InvalidNoul, InvalidScore};
+use crate::{InvalidBbox, InvalidChoice, InvalidNoul, InvalidScore};
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -9,4 +9,6 @@ pub enum QuestionError {
     Choice(#[from] InvalidChoice),
     #[error(transparent)]
     Score(#[from] InvalidScore),
+    #[error(transparent)]
+    Bbox(#[from] InvalidBbox),
 }

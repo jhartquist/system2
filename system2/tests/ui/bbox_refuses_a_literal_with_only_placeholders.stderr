@@ -1,0 +1,5 @@
+error: the instructions must have text outside the placeholders: for text from data, use `Bbox::new`
+ --> tests/ui/bbox_refuses_a_literal_with_only_placeholders.rs:5:19
+  |
+5 |     let _ = bbox!("{thing}");
+  |                   ^^^^^^^^^

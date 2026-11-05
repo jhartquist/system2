@@ -3,26 +3,29 @@ mod support;
 use std::path::Path;
 use support::{INSTRUCTIONS, cache_path, client_for, mock_api, noul_response};
 use system2::{
-    AskError, CacheError, Choice, Client, Error, Image, InvalidChoice, InvalidImage, InvalidJson,
-    InvalidNoul, InvalidScore, Noul, NoulAnswer, QuestionError, Score,
+    AskError, Bbox, CacheError, Choice, Client, Error, Image, InvalidBbox, InvalidChoice,
+    InvalidImage, InvalidJson, InvalidNoul, InvalidScore, Noul, NoulAnswer, QuestionError, Score,
 };
 use wiremock::MockServer;
 
 const OPTIONS: &[&str] = &["spam", "ham"];
 const LEVELS: &[&str] = &["low", "high"];
+const REGION: &str = "The mug.";
 
-type Questions = (Noul, Choice<&'static str>, Score<&'static str>);
+type Questions = (Noul, Choice<&'static str>, Score<&'static str>, Bbox);
 
 // a caller that builds each type of question from data
 fn questions(
     rule: &str,
     options: &[&'static str],
     levels: &[&'static str],
+    region: &str,
 ) -> Result<Questions, QuestionError> {
     Ok((
         Noul::new(rule)?,
         Choice::new(INSTRUCTIONS, options.to_vec())?,
         Score::new(INSTRUCTIONS, levels.to_vec())?,
+        Bbox::new(region)?,
     ))
 }
 
@@ -31,16 +34,18 @@ fn questions_or_error(
     rule: &str,
     options: &[&'static str],
     levels: &[&'static str],
+    region: &str,
 ) -> system2::Result<Questions> {
     Ok((
         Noul::new(rule)?,
         Choice::new(INSTRUCTIONS, options.to_vec())?,
         Score::new(INSTRUCTIONS, levels.to_vec())?,
+        Bbox::new(region)?,
     ))
 }
 
 fn questions_of_a_set() -> system2::Result<Questions> {
-    Ok(questions("", OPTIONS, LEVELS)?)
+    Ok(questions("", OPTIONS, LEVELS, REGION)?)
 }
 
 fn image(bytes: &[u8]) -> system2::Result<Image> {
@@ -57,9 +62,10 @@ async fn ask_with_no_state(server: &MockServer) -> system2::Result<NoulAnswer> {
 
 #[test]
 fn question_error_takes_the_error_of_each_constructor() {
-    let noul = questions("", OPTIONS, LEVELS).unwrap_err();
-    let choice = questions(INSTRUCTIONS, &["spam", "spam"], LEVELS).unwrap_err();
-    let score = questions(INSTRUCTIONS, OPTIONS, &[]).unwrap_err();
+    let noul = questions("", OPTIONS, LEVELS, REGION).unwrap_err();
+    let choice = questions(INSTRUCTIONS, &["spam", "spam"], LEVELS, REGION).unwrap_err();
+    let score = questions(INSTRUCTIONS, OPTIONS, &[], REGION).unwrap_err();
+    let bbox = questions(INSTRUCTIONS, OPTIONS, LEVELS, "").unwrap_err();
 
     assert!(matches!(
         noul,
@@ -73,21 +79,27 @@ fn question_error_takes_the_error_of_each_constructor() {
         score,
         QuestionError::Score(InvalidScore::Count(0))
     ));
+    assert!(matches!(
+        bbox,
+        QuestionError::Bbox(InvalidBbox::Instructions(InvalidJson::Empty))
+    ));
     assert_eq!(noul.to_string(), "the instructions must not be empty");
     assert_eq!(
         choice.to_string(),
         "each option must have a different name, but two options have the name `spam`"
     );
     assert_eq!(score.to_string(), "a Score must have 1 to 10 levels, not 0");
+    assert_eq!(bbox.to_string(), "the instructions must not be empty");
 }
 
 #[tokio::test]
 async fn error_takes_each_error_that_a_function_returns() {
     let server = mock_api(noul_response(0.92)).await;
 
-    let noul = questions_or_error("", OPTIONS, LEVELS).unwrap_err();
-    let choice = questions_or_error(INSTRUCTIONS, &["spam", "spam"], LEVELS).unwrap_err();
-    let score = questions_or_error(INSTRUCTIONS, OPTIONS, &[]).unwrap_err();
+    let noul = questions_or_error("", OPTIONS, LEVELS, REGION).unwrap_err();
+    let choice = questions_or_error(INSTRUCTIONS, &["spam", "spam"], LEVELS, REGION).unwrap_err();
+    let score = questions_or_error(INSTRUCTIONS, OPTIONS, &[], REGION).unwrap_err();
+    let bbox = questions_or_error(INSTRUCTIONS, OPTIONS, LEVELS, "").unwrap_err();
     let question = questions_of_a_set().unwrap_err();
     let image = image(include_bytes!("images/long.png")).unwrap_err();
     let ask = ask_with_no_state(&server).await.unwrap_err();
@@ -105,6 +117,10 @@ async fn error_takes_each_error_that_a_function_returns() {
     assert!(matches!(
         score,
         Error::Question(QuestionError::Score(InvalidScore::Count(0)))
+    ));
+    assert!(matches!(
+        bbox,
+        Error::Question(QuestionError::Bbox(InvalidBbox::Instructions(_)))
     ));
     assert!(matches!(
         question,

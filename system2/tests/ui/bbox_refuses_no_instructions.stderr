@@ -1,0 +1,7 @@
+error: `bbox!` takes the instructions: a string literal, a constant, or a JSON literal
+ --> tests/ui/bbox_refuses_no_instructions.rs:4:13
+  |
+4 |     let _ = bbox!();
+  |             ^^^^^^^
+  |
+  = note: this error originates in the macro `bbox` (in Nightly builds, run with -Z macro-backtrace for more info)

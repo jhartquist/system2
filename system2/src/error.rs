@@ -1,6 +1,6 @@
 use crate::{
-    AskError, CacheError, EnvError, InvalidChoice, InvalidImage, InvalidNoul, InvalidScore,
-    QuestionError,
+    AskError, CacheError, EnvError, InvalidBbox, InvalidChoice, InvalidImage, InvalidNoul,
+    InvalidScore, QuestionError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +33,12 @@ impl From<InvalidChoice> for Error {
 impl From<InvalidScore> for Error {
     fn from(error: InvalidScore) -> Self {
         Error::Question(QuestionError::Score(error))
+    }
+}
+
+impl From<InvalidBbox> for Error {
+    fn from(error: InvalidBbox) -> Self {
+        Error::Question(QuestionError::Bbox(error))
     }
 }
 

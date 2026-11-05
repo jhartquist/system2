@@ -237,6 +237,7 @@ impl Client {
         let references = image::references(iter::once(state.get()).chain(raw_question_set.texts()));
         let images = find_images(&references);
         let body = self.request_body(&raw_question_set, &state, &references);
+        let has_bbox = raw_question_set.has_bbox();
         let request_sha256 = cache::sha256(body.as_bytes());
         let span = info_span!(
             "ask",
@@ -254,7 +255,7 @@ impl Client {
         );
         let request = self
             .clone()
-            .send(body, request_sha256, images)
+            .send(body, request_sha256, images, has_bbox)
             .instrument(span);
         AskFuture::new(question_set, request)
     }
@@ -273,6 +274,7 @@ impl Client {
         body: String,
         request_sha256: [u8; 32],
         images: Result<Vec<(String, Bytes)>, AskError>,
+        has_bbox: bool,
     ) -> Result<Response, AskError> {
         if self.trace_bodies {
             trace!(target: "system2::body", { system2.body = body }, "body");
@@ -306,7 +308,8 @@ impl Client {
             return Err(AskError::Offline);
         }
 
-        let (text, request_id, latency) = self.post(body, request_sha256, &images).await?;
+        let (text, request_id, latency) =
+            self.post(body, request_sha256, &images, has_bbox).await?;
         let json = parse_json(&text, request_id.as_deref())?;
         let usage = read_usage(&json, request_id.as_deref())?;
 
@@ -339,12 +342,14 @@ impl Client {
         body: String,
         request_sha256: [u8; 32],
         images: &[(String, Bytes)],
+        has_bbox: bool,
     ) -> Result<(String, Option<String>, Duration), AskError> {
         let url = self.endpoint()?;
 
         // the hash of the json, which no part of the body can hold
         let boundary = (!images.is_empty()).then(|| hex::encode(request_sha256));
-        let headers = self.headers(boundary.as_deref())?;
+        let headers = self.headers(boundary.as_deref(), has_bbox)?;
+        let bbox_model = has_bbox.then_some(self.model.as_str());
         let body = match &boundary {
             Some(boundary) => multipart(boundary, &body, images)?,
             None => body.into_bytes(),
@@ -364,7 +369,7 @@ impl Client {
         loop {
             let attempt = retries + 1;
             let attempt_started = Instant::now();
-            let (status, result) = self.attempt(&url, &headers, &body).await;
+            let (status, result) = self.attempt(&url, &headers, &body, bbox_model).await;
             let time_ms = millis(attempt_started.elapsed());
             let (error, wait) = match result {
                 Ok((text, request_id)) => {
@@ -410,6 +415,7 @@ impl Client {
         url: &Url,
         headers: &HeaderMap,
         body: &[u8],
+        bbox_model: Option<&str>,
     ) -> (Option<u16>, Result<(String, Option<String>), Failure>) {
         let sent = self
             .http
@@ -422,7 +428,7 @@ impl Client {
         match sent {
             Ok(response) => (
                 Some(response.status().as_u16()),
-                read_success(response, self.long_context).await,
+                read_success(response, self.long_context, bbox_model).await,
             ),
             Err(error) => (None, Err(Failure::from_reqwest(error))),
         }
@@ -439,7 +445,7 @@ impl Client {
     }
 
     // a boundary for a multipart body, which a request with images has
-    fn headers(&self, boundary: Option<&str>) -> Result<HeaderMap, AskError> {
+    fn headers(&self, boundary: Option<&str>, has_bbox: bool) -> Result<HeaderMap, AskError> {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, self.authorization()?);
 
@@ -449,7 +455,7 @@ impl Client {
         };
         headers.insert(CONTENT_TYPE, content_type);
 
-        if boundary.is_some() {
+        if boundary.is_some() || has_bbox {
             headers.insert(IMAGES_HEADER, HeaderValue::from_static("true"));
         }
         if self.compression == Compression::Zstd {
@@ -675,6 +681,7 @@ fn endpoint_for(base_url: &str) -> Option<Url> {
 async fn read_success(
     response: reqwest::Response,
     long_context: bool,
+    bbox_model: Option<&str>,
 ) -> Result<(String, Option<String>), Failure> {
     let status = response.status();
     let request_id = request_id(response.headers());
@@ -689,7 +696,7 @@ async fn read_success(
     if status.is_success() {
         return Ok((text, request_id));
     }
-    let error = AskError::from_status(status, &text, request_id, long_context);
+    let error = AskError::from_status(status, &text, request_id, long_context, bbox_model);
     match error {
         AskError::Http {
             status: 408 | 429 | 500..=599,

@@ -1,6 +1,7 @@
 //! The macros of `system2`.
 
 mod answers;
+mod bbox;
 mod choice;
 mod derive;
 #[cfg(feature = "image")]
@@ -31,6 +32,12 @@ pub fn choice(input: TokenStream) -> TokenStream {
 pub fn score(input: TokenStream) -> TokenStream {
     let score = parse_macro_input!(input as score::Score);
     score.into_token_stream().into()
+}
+
+#[proc_macro]
+pub fn bbox(input: TokenStream) -> TokenStream {
+    let bbox = parse_macro_input!(input as bbox::Bbox);
+    bbox.into_token_stream().into()
 }
 
 #[proc_macro]

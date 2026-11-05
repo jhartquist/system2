@@ -3,6 +3,7 @@ use reqwest::StatusCode;
 use serde_json::Value;
 
 const TOKEN_LIMIT: &str = "max_tokens_exceeded";
+const BBOX_MODEL_REFUSAL: &str = "Invalid request.";
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -35,6 +36,11 @@ pub enum AskError {
          keep the `Image` until `ask` returns"
     )]
     MissingImage { reference: String },
+    #[error(
+        "the model of a Bbox must be `jev-1.14.0` or a later version, not `{model}`: \
+         call `Client::model(\"jev-1.14.0\")`"
+    )]
+    BboxModel { model: String },
     #[error("the response must arrive within the timeout: raise it with `Client::timeout`")]
     Timeout,
     #[error("the connection to the API failed: {0}")]
@@ -63,14 +69,25 @@ impl AskError {
         body: &str,
         request_id: Option<String>,
         long_context: bool,
+        bbox_model: Option<&str>,
     ) -> Self {
         let response: Value = serde_json::from_str(body).unwrap_or_default();
         let detail = &response["detail"];
         if detail["error_type"] == TOKEN_LIMIT {
             return AskError::TokenLimit { long_context };
         }
+        let message = api_message(detail);
+
+        // the api refuses a bbox on a model before `jev-1.14.0` with only this message
+        if let Some(model) = bbox_model
+            && status == StatusCode::BAD_REQUEST
+            && message.as_deref() == Some(BBOX_MODEL_REFUSAL)
+        {
+            let model = model.to_owned();
+            return AskError::BboxModel { model };
+        }
         let reason = status.canonical_reason().filter(|_| body.trim().is_empty());
-        let message = api_message(detail).unwrap_or_else(|| reason.unwrap_or(body).to_owned());
+        let message = message.unwrap_or_else(|| reason.unwrap_or(body).to_owned());
         AskError::Http {
             status: status.as_u16(),
             message,
@@ -165,7 +182,7 @@ mod tests {
         for (code, body, expected) in cases {
             let status = StatusCode::from_u16(code).unwrap();
 
-            let error = AskError::from_status(status, &body, None, false);
+            let error = AskError::from_status(status, &body, None, false, None);
 
             assert_eq!(
                 error.to_string(),
@@ -191,13 +208,50 @@ mod tests {
             ),
         ];
         for (long_context, message) in cases {
-            let error = AskError::from_status(StatusCode::BAD_REQUEST, &body, None, long_context);
+            let error =
+                AskError::from_status(StatusCode::BAD_REQUEST, &body, None, long_context, None);
 
             assert!(
                 matches!(error, AskError::TokenLimit { long_context: found } if found == long_context),
                 "{error:?}"
             );
             assert_eq!(error.to_string(), message);
+        }
+    }
+
+    #[test]
+    fn from_status_finds_a_bbox_on_an_older_model() {
+        let invalid_request =
+            json!({ "detail": { "error_type": "api_usage_error", "message": "Invalid request." } })
+                .to_string();
+        let other_message = json!({ "detail": "Invalid image request." }).to_string();
+        let cases = [
+            (400, &invalid_request, Some("jev-1.13.0"), true),
+            (400, &invalid_request, None, false),
+            (400, &other_message, Some("jev-1.13.0"), false),
+            (422, &invalid_request, Some("jev-1.13.0"), false),
+        ];
+        for (code, body, bbox_model, is_bbox_model) in cases {
+            let status = StatusCode::from_u16(code).unwrap();
+
+            let error = AskError::from_status(status, body, None, false, bbox_model);
+
+            if is_bbox_model {
+                assert!(
+                    matches!(&error, AskError::BboxModel { model } if model == "jev-1.13.0"),
+                    "{error:?}"
+                );
+                assert_eq!(
+                    error.to_string(),
+                    "the model of a Bbox must be `jev-1.14.0` or a later version, \
+                     not `jev-1.13.0`: call `Client::model(\"jev-1.14.0\")`"
+                );
+            } else {
+                assert!(
+                    matches!(error, AskError::Http { .. }),
+                    "{code} {body} {error:?}"
+                );
+            }
         }
     }
 

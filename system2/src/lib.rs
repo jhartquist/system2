@@ -20,15 +20,16 @@ pub use error::{Error, Result};
 pub use image::{Image, InvalidImage};
 pub use json::InvalidJson;
 pub use question::{
-    Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, InvalidNoul, InvalidScore, Label, Levels,
-    Noul, NoulAnswer, Options, QuestionError, Score, ScoreAnswer, ScoreLevel,
+    Bbox, BboxAnswer, Choice, ChoiceAnswer, ChoiceOption, InvalidBbox, InvalidChoice, InvalidNoul,
+    InvalidScore, Label, Levels, Noul, NoulAnswer, Options, PixelBox, QuestionError, Score,
+    ScoreAnswer, ScoreLevel,
 };
-pub use system2_macros::{Answers, Levels, Options, choice, noul, questions, score};
+pub use system2_macros::{Answers, Levels, Options, bbox, choice, noul, questions, score};
 
 pub mod prelude {
     #[doc(no_inline)]
     pub use crate::{
-        Answers, AskIterator, Levels, Options, QuestionSet, Questions, choice, image, noul,
+        Answers, AskIterator, Levels, Options, QuestionSet, Questions, bbox, choice, image, noul,
         questions, score,
     };
 }
@@ -42,6 +43,7 @@ pub mod __private {
     pub use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     pub use crate::image::{image_error, static_image};
     pub use crate::json::{AlwaysSerialize, Json, is_blank, to_json, unescaped};
+    pub use crate::question::bbox::bbox;
     pub use crate::question::choice::{choice, owned_choice};
     pub use crate::question::noul::noul;
     pub use crate::question::score::score;

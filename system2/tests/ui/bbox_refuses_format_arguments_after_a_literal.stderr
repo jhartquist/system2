@@ -1,0 +1,5 @@
+error: `bbox!` takes the instructions, and nothing more: to fill in the instructions, name each value in a placeholder, as in `{name}`
+ --> tests/ui/bbox_refuses_format_arguments_after_a_literal.rs:5:30
+  |
+5 |     let _ = bbox!("The {}.", thing);
+  |                              ^^^^^

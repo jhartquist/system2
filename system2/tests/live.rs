@@ -151,6 +151,22 @@ async fn ask_sends_an_image_in_place_of_its_reference() -> system2::Result<()> {
     Ok(())
 }
 
+// a black square from 320 to 440 px across and from 120 to 240 px down, on white
+const SQUARE: Image = image!("images/square.png");
+
+#[tokio::test]
+async fn ask_answers_a_bbox_with_the_edges_of_the_region() -> system2::Result<()> {
+    let square = replay()?.ask(bbox!("The black square."), &SQUARE).await?;
+
+    // within one patch of 28 px, as the model sees the image
+    let pixels = square.to_pixels(SQUARE.width(), SQUARE.height());
+    let edges = [pixels.left, pixels.top, pixels.right, pixels.bottom];
+    for (edge, expected) in edges.into_iter().zip([320, 120, 440, 240]) {
+        assert!(edge.abs_diff(expected) <= 28, "{pixels:?}");
+    }
+    Ok(())
+}
+
 fn over_the_default_limit() -> String {
     "word ".repeat(40_000)
 }
@@ -222,6 +238,22 @@ async fn ask_reports_the_token_limit_of_long_context() {
 
     assert!(
         matches!(error, AskError::TokenLimit { long_context: true }),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs TYPESAFE_API_KEY"]
+async fn ask_reports_a_bbox_on_an_older_model() {
+    let error = live()
+        .unwrap()
+        .model("jev-1.13.0")
+        .ask(bbox!("The black square."), &SQUARE)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&error, AskError::BboxModel { model } if model == "jev-1.13.0"),
         "{error:?}"
     );
 }

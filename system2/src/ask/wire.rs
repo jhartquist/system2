@@ -21,6 +21,7 @@ pub trait Sealed {
 #[derive(Debug, Default)]
 pub struct RawQuestionSet {
     questions: Vec<Box<RawValue>>,
+    has_bbox: bool,
 }
 
 impl RawQuestionSet {
@@ -28,6 +29,16 @@ impl RawQuestionSet {
     pub(crate) fn push(&mut self, question: &impl Serialize) {
         let question = to_raw_value(question).expect("a question serializes");
         self.questions.push(question);
+    }
+
+    // a bbox needs the images header, also with no image
+    pub(crate) fn push_bbox(&mut self, question: &impl Serialize) {
+        self.push(question);
+        self.has_bbox = true;
+    }
+
+    pub(crate) fn has_bbox(&self) -> bool {
+        self.has_bbox
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -147,6 +158,18 @@ mod tests {
             serde_json::to_string(&raw_question_set).unwrap(),
             r#"{"q0":0,"q1":1,"q2":2,"q3":3,"q4":4,"q5":5,"q6":6,"q7":7,"q8":8,"q9":9,"q10":10}"#
         );
+    }
+
+    #[test]
+    fn push_bbox_marks_the_set_for_the_images_header() {
+        let mut raw_question_set = RawQuestionSet::default();
+        raw_question_set.push(&"noul");
+        assert!(!raw_question_set.has_bbox());
+
+        raw_question_set.push_bbox(&"box");
+
+        assert!(raw_question_set.has_bbox());
+        assert_eq!(raw_question_set.texts(), [r#""noul""#, r#""box""#]);
     }
 
     #[test]
