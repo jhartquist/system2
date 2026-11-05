@@ -14,11 +14,11 @@ proc-macro = true
 workspace = true
 
 [features]
-image = ["dep:system2-shared", "system2-shared/image"]
+image = ["system2-shared/image"]
 
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
 serde_json = "1"
-system2-shared = { version = "0.1.0", path = "../system2-shared", optional = true }
+system2-shared = { version = "0.1.0", path = "../system2-shared" }
 syn = { version = "2", features = ["full"] }

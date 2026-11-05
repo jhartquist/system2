@@ -2,6 +2,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use std::collections::{HashMap, HashSet};
 use syn::{Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Ident, Lit, Meta, Variant};
+use system2_shared::{choice, score};
 
 struct Derive {
     trait_name: &'static str,
@@ -10,6 +11,7 @@ struct Derive {
     an_item: &'static str,
     allows_rename: bool,
     max_variants: usize,
+    count_message: fn(usize) -> String,
 }
 
 const OPTIONS: Derive = Derive {
@@ -18,7 +20,8 @@ const OPTIONS: Derive = Derive {
     items: "options",
     an_item: "an option",
     allows_rename: true,
-    max_variants: 255,
+    max_variants: choice::MAX_OPTIONS,
+    count_message: choice::count_message,
 };
 
 const LEVELS: Derive = Derive {
@@ -27,7 +30,8 @@ const LEVELS: Derive = Derive {
     items: "levels",
     an_item: "a level",
     allows_rename: false,
-    max_variants: 10,
+    max_variants: score::MAX_LEVELS,
+    count_message: score::count_message,
 };
 
 struct Entry<'a> {
@@ -54,8 +58,8 @@ pub(crate) fn options(input: &DeriveInput) -> syn::Result<TokenStream> {
         } = entry;
         if !names.insert(name) {
             let message = format!(
-                "each option must have a different name, but two options have the name `{name}`: \
-                 rename one with `#[system2(rename = \"…\")]`"
+                "{}: rename one with `#[system2(rename = \"…\")]`",
+                choice::duplicate_message(name)
             );
             return Err(syn::Error::new(*span, message));
         }
@@ -148,8 +152,8 @@ fn entries<'a>(input: &'a DeriveInput, derive: &Derive) -> syn::Result<Vec<Entry
     let Derive {
         trait_name,
         question,
-        items,
         max_variants,
+        count_message,
         ..
     } = derive;
 
@@ -175,8 +179,7 @@ fn entries<'a>(input: &'a DeriveInput, derive: &Derive) -> syn::Result<Vec<Entry
             Some(extra) => extra.ident.span(),
             None => input.ident.span(),
         };
-        let message = format!("a {question} must have 1 to {max_variants} {items}, not {count}");
-        return Err(syn::Error::new(span, message));
+        return Err(syn::Error::new(span, count_message(count)));
     }
 
     // validate each variant and collect into Vec

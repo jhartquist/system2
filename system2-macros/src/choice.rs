@@ -4,8 +4,7 @@ use quote::{ToTokens, quote};
 use std::collections::HashSet;
 use syn::parse::{Parse, ParseStream, Parser};
 use syn::{Expr, LitStr, Token, Type, braced, bracketed, parenthesized, token};
-
-const MAX_OPTIONS: usize = 255;
+use system2_shared::choice::{self, MAX_OPTIONS};
 
 const TAKES: &str =
     "`choice!` takes the instructions, then the options: a type, an object, or an array";
@@ -221,15 +220,11 @@ fn validated(entries: Vec<Entry>, brackets: Span) -> syn::Result<Vec<Entry>> {
     let count = entries.len();
     if !(1..=MAX_OPTIONS).contains(&count) {
         let span = entries.get(MAX_OPTIONS).map_or(brackets, |e| e.name.span());
-        let message = format!("a Choice must have 1 to {MAX_OPTIONS} options, not {count}");
-        return Err(syn::Error::new(span, message));
+        return Err(syn::Error::new(span, choice::count_message(count)));
     }
     let mut names = HashSet::new();
     if let Some(entry) = entries.iter().find(|e| !names.insert(e.name.value())) {
-        let message = format!(
-            "each option must have a different name, but two options have the name `{}`",
-            entry.name.value()
-        );
+        let message = choice::duplicate_message(&entry.name.value());
         return Err(syn::Error::new(entry.name.span(), message));
     }
     Ok(entries)

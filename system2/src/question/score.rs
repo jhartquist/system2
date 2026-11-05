@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::collections::HashMap;
-
-const MAX_LEVELS: usize = 10;
+use system2_shared::score::{self, MAX_LEVELS};
 
 #[derive(Debug, Clone)]
 pub struct Score<L> {
@@ -160,11 +159,9 @@ pub enum InvalidScore {
     Instructions(InvalidJson),
     #[error("the level at index {index} {error}")]
     Level { index: usize, error: InvalidJson },
-    #[error("a Score must have 1 to 10 levels, not {0}")]
+    #[error("{}", score::count_message(*.0))]
     Count(usize),
-    #[error(
-        "each level must be different, but the levels at index {first} and {second} are the same"
-    )]
+    #[error("{}", score::duplicate_message(*.first, *.second))]
     Duplicate { first: usize, second: usize },
 }
 

@@ -4,8 +4,7 @@ use quote::{ToTokens, quote};
 use std::collections::HashMap;
 use syn::parse::{Parse, ParseStream};
 use syn::{Expr, LitStr, Token, Type, bracketed, parenthesized, token};
-
-const MAX_LEVELS: usize = 10;
+use system2_shared::score::{self, MAX_LEVELS};
 
 const TAKES: &str = "`score!` takes the instructions, then the levels: a type or an array";
 
@@ -126,16 +125,12 @@ fn validated(entries: Vec<Entry>, brackets: Span) -> syn::Result<Vec<Entry>> {
     let count = entries.len();
     if !(1..=MAX_LEVELS).contains(&count) {
         let span = entries.get(MAX_LEVELS).map_or(brackets, |e| e.level.span());
-        let message = format!("a Score must have 1 to {MAX_LEVELS} levels, not {count}");
-        return Err(syn::Error::new(span, message));
+        return Err(syn::Error::new(span, score::count_message(count)));
     }
     let mut indexes = HashMap::new();
     for (second, entry) in entries.iter().enumerate() {
         if let Some(first) = indexes.insert(entry.level.value(), second) {
-            let message = format!(
-                "each level must be different, but the levels at index {first} and {second} \
-                 are the same"
-            );
+            let message = score::duplicate_message(first, second);
             return Err(syn::Error::new(entry.level.span(), message));
         }
     }

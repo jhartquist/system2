@@ -8,8 +8,7 @@ use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
-
-const MAX_OPTIONS: usize = 255;
+use system2_shared::choice::{self, MAX_OPTIONS};
 
 #[derive(Debug, Clone)]
 pub struct Choice<O> {
@@ -267,9 +266,9 @@ pub enum InvalidChoice {
     EmptyName { index: usize },
     #[error("the description of the option `{name}` {error}")]
     Description { name: String, error: InvalidJson },
-    #[error("a Choice must have 1 to 255 options, not {0}")]
+    #[error("{}", choice::count_message(*.0))]
     Count(usize),
-    #[error("each option must have a different name, but two options have the name `{name}`")]
+    #[error("{}", choice::duplicate_message(.name))]
     Duplicate { name: String },
 }
 
