@@ -138,6 +138,22 @@ async fn ask_takes_json_in_each_slot() -> system2::Result<()> {
     Ok(())
 }
 
+// about 40k tokens, over the limit of the state and the longest question
+fn over_the_default_limit() -> String {
+    "word ".repeat(40_000)
+}
+
+#[tokio::test]
+async fn long_context_raises_the_token_limit() -> system2::Result<()> {
+    let long = replay()?
+        .long_context(true)
+        .ask(noul!("Is the text long?"), &over_the_default_limit())
+        .await?;
+
+    assert!(long.is_likely());
+    Ok(())
+}
+
 // the cache keeps no refusals, and gives no tokens or request ID, so these need the api
 
 #[tokio::test]
@@ -162,16 +178,40 @@ async fn ask_with_receipt_tells_the_version_the_tokens_and_the_request_id() {
 #[tokio::test]
 #[ignore = "needs TYPESAFE_API_KEY"]
 async fn ask_reports_the_token_limit() {
-    // about 40k tokens, over the limit of the state and the longest question
-    let state = "word ".repeat(40_000);
+    let error = live()
+        .unwrap()
+        .ask(noul!("Is the text long?"), &over_the_default_limit())
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            AskError::TokenLimit {
+                long_context: false
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs TYPESAFE_API_KEY"]
+async fn ask_reports_the_token_limit_of_long_context() {
+    // about 270k tokens, over the limit of long context
+    let state = "word ".repeat(270_000);
 
     let error = live()
         .unwrap()
+        .long_context(true)
         .ask(noul!("Is the text long?"), &state)
         .await
         .unwrap_err();
 
-    assert!(matches!(error, AskError::TokenLimit), "{error:?}");
+    assert!(
+        matches!(error, AskError::TokenLimit { long_context: true }),
+        "{error:?}"
+    );
 }
 
 #[tokio::test]

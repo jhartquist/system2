@@ -9,7 +9,7 @@ use support::{
     INSTRUCTIONS, STATE, accept_api_request, client_for, mock_api, no_request_sent, noul_response,
     only_request, request_body,
 };
-use system2::{AskError, Client, InvalidJson, Noul};
+use system2::{AskError, Client, Compression, InvalidJson, Noul};
 use tokio::io::AsyncReadExt;
 use tokio::time::timeout;
 use wiremock::ResponseTemplate;
@@ -240,16 +240,65 @@ async fn ask_reports_the_token_limit() {
     let body = json!({ "detail": { "error_type": "max_tokens_exceeded" } });
     let server = mock_api(ResponseTemplate::new(400).set_body_json(body)).await;
 
-    let error = client_for(&server)
-        .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
-        .await
-        .unwrap_err();
+    for long_context in [false, true] {
+        let error = client_for(&server)
+            .long_context(long_context)
+            .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
+            .await
+            .unwrap_err();
 
-    assert!(matches!(error, AskError::TokenLimit));
-    assert_eq!(
-        error.to_string(),
-        "the request has too many tokens: use `Client::long_context(true)`"
-    );
+        assert!(
+            matches!(error, AskError::TokenLimit { long_context: found } if found == long_context),
+            "{error:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn long_context_sends_its_header() {
+    let cases = [
+        (Client::new(), None),
+        (Client::new().long_context(true), Some("true")),
+        (Client::new().long_context(true).long_context(false), None),
+    ];
+    for (client, expected) in cases {
+        let server = mock_api(noul_response(0.92)).await;
+
+        client
+            .api_key("key")
+            .base_url(server.uri())
+            .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
+            .await
+            .unwrap();
+
+        let request = only_request(&server).await;
+        let header = request.headers.get("typesafe-danger-zone-long-context");
+        assert_eq!(header.map(|value| value.to_str().unwrap()), expected);
+    }
+}
+
+#[tokio::test]
+async fn compression_sets_the_encoding_of_the_body() {
+    let cases = [(Compression::Zstd, Some("zstd")), (Compression::None, None)];
+    for (compression, encoding) in cases {
+        let server = mock_api(noul_response(0.92)).await;
+
+        client_for(&server)
+            .compression(compression)
+            .ask(Noul::new(INSTRUCTIONS).unwrap(), STATE)
+            .await
+            .unwrap();
+
+        let request = only_request(&server).await;
+        let header = request.headers.get("content-encoding");
+        assert_eq!(header.map(|value| value.to_str().unwrap()), encoding);
+        let body = match encoding {
+            Some(_) => zstd::decode_all(request.body.as_slice()).unwrap(),
+            None => request.body,
+        };
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["state"], STATE, "{compression:?}");
+    }
 }
 
 #[tokio::test]

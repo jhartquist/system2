@@ -14,7 +14,7 @@ pub use ask::{
     Answers, AskError, AskFuture, AskIterator, AskWithReceiptFuture, QuestionSet, Questions,
     Receipt, Tagged, Usage,
 };
-pub use client::{CacheError, Client, EnvError};
+pub use client::{CacheError, Client, Compression, EnvError};
 pub use error::{Error, Result};
 pub use json::InvalidJson;
 pub use question::{

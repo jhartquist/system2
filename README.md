@@ -55,7 +55,7 @@ async fn main() -> system2::Result<()> {
 - [x] any serializable state
 - [x] compile-time checks for static questions
 - [x] run-time checks for dynamic questions
-- [ ] client
+- [x] client
   - [x] global client
   - [x] retries
   - [x] concurrency limit

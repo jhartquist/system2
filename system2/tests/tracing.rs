@@ -15,7 +15,7 @@ use support::{
     noul, noul_answer, noul_response, only_request, partial_api, request_text, response,
     sha256_hex,
 };
-use system2::{AskError, Client, Noul};
+use system2::{AskError, Client, Compression, Noul};
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Level, Subscriber};
@@ -166,6 +166,28 @@ async fn ask_traces_a_span_with_the_request_and_the_receipt() {
             ("gen_ai.usage.output_tokens", "1"),
             ("system2.request_id", "req_1"),
         ])
+    );
+}
+
+// the coverage tool counts the request code of each test file alone, and this file runs each
+// other path of it
+#[tokio::test]
+async fn ask_traces_the_hash_of_the_body_before_compression() {
+    capture();
+    let server = mock_api(noul_response(0.92)).await;
+
+    for compression in [Compression::Zstd, Compression::None] {
+        client_for(&server)
+            .compression(compression)
+            .ask(nouls(&[INSTRUCTIONS]), STATE)
+            .await
+            .unwrap();
+    }
+
+    let [zstd, none] = traced_spans().try_into().unwrap();
+    assert_eq!(
+        zstd.fields.0["system2.request_sha256"],
+        none.fields.0["system2.request_sha256"]
     );
 }
 

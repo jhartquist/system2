@@ -23,8 +23,8 @@ pub enum AskError {
          set `SYSTEM2_CACHE` or call `Client::cache`, and record the response with a run online"
     )]
     Offline,
-    #[error("the request has too many tokens: use `Client::long_context(true)`")]
-    TokenLimit,
+    #[error("the request has too many tokens{}", token_limit_fix(*long_context))]
+    TokenLimit { long_context: bool },
     #[error("the response must arrive within the timeout: raise it with `Client::timeout`")]
     Timeout,
     #[error("the connection to the API failed: {0}")]
@@ -48,11 +48,16 @@ pub enum AskError {
 }
 
 impl AskError {
-    pub(crate) fn from_status(status: StatusCode, body: &str, request_id: Option<String>) -> Self {
+    pub(crate) fn from_status(
+        status: StatusCode,
+        body: &str,
+        request_id: Option<String>,
+        long_context: bool,
+    ) -> Self {
         let response: Value = serde_json::from_str(body).unwrap_or_default();
         let detail = &response["detail"];
         if detail["error_type"] == TOKEN_LIMIT {
-            return AskError::TokenLimit;
+            return AskError::TokenLimit { long_context };
         }
         let reason = status.canonical_reason().filter(|_| body.trim().is_empty());
         let message = api_message(detail).unwrap_or_else(|| reason.unwrap_or(body).to_owned());
@@ -92,6 +97,14 @@ fn api_message(detail: &Value) -> Option<String> {
             (!messages.is_empty()).then(|| messages.join("; "))
         }
         _ => detail["message"].as_str().map(str::to_owned),
+    }
+}
+
+fn token_limit_fix(long_context: bool) -> &'static str {
+    if long_context {
+        " for long context: make the state smaller, or split the questions into many requests"
+    } else {
+        ": raise the limits with `Client::long_context(true)`"
     }
 }
 
@@ -142,7 +155,7 @@ mod tests {
         for (code, body, expected) in cases {
             let status = StatusCode::from_u16(code).unwrap();
 
-            let error = AskError::from_status(status, &body, None);
+            let error = AskError::from_status(status, &body, None, false);
 
             assert_eq!(
                 error.to_string(),
@@ -155,14 +168,27 @@ mod tests {
     #[test]
     fn from_status_finds_the_token_limit() {
         let body = json!({ "detail": { "error_type": "max_tokens_exceeded" } }).to_string();
+        let cases = [
+            (
+                false,
+                "the request has too many tokens: \
+                 raise the limits with `Client::long_context(true)`",
+            ),
+            (
+                true,
+                "the request has too many tokens for long context: \
+                 make the state smaller, or split the questions into many requests",
+            ),
+        ];
+        for (long_context, message) in cases {
+            let error = AskError::from_status(StatusCode::BAD_REQUEST, &body, None, long_context);
 
-        let error = AskError::from_status(StatusCode::BAD_REQUEST, &body, None);
-
-        assert!(matches!(error, AskError::TokenLimit));
-        assert_eq!(
-            error.to_string(),
-            "the request has too many tokens: use `Client::long_context(true)`"
-        );
+            assert!(
+                matches!(error, AskError::TokenLimit { long_context: found } if found == long_context),
+                "{error:?}"
+            );
+            assert_eq!(error.to_string(), message);
+        }
     }
 
     #[test]

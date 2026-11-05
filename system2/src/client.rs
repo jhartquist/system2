@@ -5,12 +5,13 @@ use crate::{AskError, AskFuture, AskWithReceiptFuture, QuestionSet, Receipt, Usa
 use cache::{Cache, PendingLine};
 use reqwest::Url;
 use reqwest::header::{
-    AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderValue, RETRY_AFTER,
+    AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, RETRY_AFTER,
 };
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::path::PathBuf;
@@ -34,6 +35,7 @@ const LONGEST_RETRY_AFTER: Duration = Duration::from_secs(30);
 const JITTER: f64 = 0.25;
 const REQUEST_ID: &str = "x-typesafe-request-id";
 const RETRY_AFTER_MS: &str = "retry-after-ms";
+const LONG_CONTEXT: HeaderName = HeaderName::from_static("typesafe-danger-zone-long-context");
 
 static GLOBAL: Mutex<Option<Client>> = Mutex::new(None);
 
@@ -46,6 +48,8 @@ pub struct Client {
     timeout: Duration,
     max_retries: u32,
     limit: Arc<Semaphore>,
+    long_context: bool,
+    compression: Compression,
     cache: Option<Arc<Cache>>,
     offline: bool,
     trace_bodies: bool,
@@ -73,6 +77,8 @@ impl Client {
             timeout: TIMEOUT,
             max_retries: MAX_RETRIES,
             limit: Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS)),
+            long_context: false,
+            compression: Compression::default(),
             cache: None,
             offline: false,
             trace_bodies: false,
@@ -144,6 +150,22 @@ impl Client {
         let permits = max_concurrent_requests.clamp(1, Semaphore::MAX_PERMITS);
         let limit = Arc::new(Semaphore::new(permits));
         Client { limit, ..self }
+    }
+
+    #[must_use]
+    pub fn long_context(self, long_context: bool) -> Self {
+        Client {
+            long_context,
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn compression(self, compression: Compression) -> Self {
+        Client {
+            compression,
+            ..self
+        }
     }
 
     pub fn cache(self, path: impl Into<PathBuf>) -> Result<Self, CacheError> {
@@ -295,8 +317,11 @@ impl Client {
     #[expect(clippy::expect_used, reason = "the client never closes its limit")]
     async fn post(&self, body: &[u8]) -> Result<(String, Option<String>, Duration), AskError> {
         let url = self.endpoint()?;
-        let authorization = self.authorization()?;
-        let body = compress(body);
+        let headers = self.headers()?;
+        let body = match self.compression {
+            Compression::None => Cow::Borrowed(body),
+            Compression::Zstd => Cow::Owned(compress(body)),
+        };
 
         // held through the retries, and a drop of the future gives it back
         let _permit = self.limit.acquire().await.expect("the limit is open");
@@ -307,7 +332,7 @@ impl Client {
         loop {
             let attempt = retries + 1;
             let attempt_started = Instant::now();
-            let (status, result) = self.attempt(&url, &authorization, &body).await;
+            let (status, result) = self.attempt(&url, &headers, &body).await;
             let time_ms = millis(attempt_started.elapsed());
             let (error, wait) = match result {
                 Ok((text, request_id)) => {
@@ -351,15 +376,13 @@ impl Client {
     async fn attempt(
         &self,
         url: &Url,
-        authorization: &HeaderValue,
+        headers: &HeaderMap,
         body: &[u8],
     ) -> (Option<u16>, Result<(String, Option<String>), Failure>) {
         let sent = self
             .http
             .post(url.clone())
-            .header(AUTHORIZATION, authorization.clone())
-            .header(CONTENT_TYPE, "application/json")
-            .header(CONTENT_ENCODING, "zstd")
+            .headers(headers.clone())
             .timeout(self.timeout)
             .body(body.to_vec())
             .send()
@@ -367,7 +390,7 @@ impl Client {
         match sent {
             Ok(response) => (
                 Some(response.status().as_u16()),
-                read_success(response).await,
+                read_success(response, self.long_context).await,
             ),
             Err(error) => (None, Err(Failure::from_reqwest(error))),
         }
@@ -381,6 +404,19 @@ impl Client {
 
     fn lock_usage(&self) -> MutexGuard<'_, Usage> {
         self.usage.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn headers(&self) -> Result<HeaderMap, AskError> {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, self.authorization()?);
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        if self.compression == Compression::Zstd {
+            headers.insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
+        }
+        if self.long_context {
+            headers.insert(LONG_CONTEXT, HeaderValue::from_static("true"));
+        }
+        Ok(headers)
     }
 
     fn authorization(&self) -> Result<HeaderValue, AskError> {
@@ -421,6 +457,14 @@ pub enum EnvError {
     InvalidBaseUrl { url: String },
     #[error(transparent)]
     Cache(CacheError),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Compression {
+    None,
+    #[default]
+    Zstd,
 }
 
 #[derive(Debug)]
@@ -508,7 +552,10 @@ fn endpoint_for(base_url: &str) -> Option<Url> {
 }
 
 // the text and the request ID of a response with a success status
-async fn read_success(response: reqwest::Response) -> Result<(String, Option<String>), Failure> {
+async fn read_success(
+    response: reqwest::Response,
+    long_context: bool,
+) -> Result<(String, Option<String>), Failure> {
     let status = response.status();
     let request_id = request_id(response.headers());
     let retry_after = retry_after(response.headers(), SystemTime::now());
@@ -522,7 +569,7 @@ async fn read_success(response: reqwest::Response) -> Result<(String, Option<Str
     if status.is_success() {
         return Ok((text, request_id));
     }
-    let error = AskError::from_status(status, &text, request_id);
+    let error = AskError::from_status(status, &text, request_id, long_context);
     match error {
         AskError::Http {
             status: 408 | 429 | 500..=599,
@@ -649,6 +696,8 @@ impl fmt::Debug for Client {
             .field("model", &self.model)
             .field("timeout", &self.timeout)
             .field("max_retries", &self.max_retries)
+            .field("long_context", &self.long_context)
+            .field("compression", &self.compression)
             .field("cache", &self.cache.as_ref().map(|cache| cache.path()))
             .field("offline", &self.offline)
             .field("trace_bodies", &self.trace_bodies)
@@ -659,8 +708,8 @@ impl fmt::Debug for Client {
 #[cfg(test)]
 mod tests {
     use super::{
-        Client, REQUEST_ID, ResponseBody, backoff, jitter, parse_json, read_response, read_usage,
-        request_id, retry_after, retry_wait,
+        Client, Compression, REQUEST_ID, ResponseBody, backoff, jitter, parse_json, read_response,
+        read_usage, request_id, retry_after, retry_wait,
     };
     use crate::AskError;
     use crate::ask::wire::RawQuestionSet;
@@ -991,8 +1040,8 @@ mod tests {
                 format!("{client:?}"),
                 format!(
                     "Client {{ base_url: \"https://api.typesafe.ai\", model: \"jev-latest\", \
-                     timeout: 10s, max_retries: 2, cache: {cache}, offline: {offline}, \
-                     trace_bodies: false, .. }}"
+                     timeout: 10s, max_retries: 2, long_context: false, compression: Zstd, \
+                     cache: {cache}, offline: {offline}, trace_bodies: false, .. }}"
                 )
             );
         }
@@ -1009,6 +1058,8 @@ mod tests {
         assert_eq!(client.timeout, Duration::from_secs(10));
         assert_eq!(client.max_retries, 2);
         assert_eq!(client.limit.available_permits(), 8);
+        assert!(!client.long_context);
+        assert_eq!(client.compression, Compression::Zstd);
         assert!(!client.trace_bodies);
     }
 }
