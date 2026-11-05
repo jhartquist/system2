@@ -1,5 +1,6 @@
 use crate::{
-    AskError, CacheError, EnvError, InvalidChoice, InvalidNoul, InvalidScore, QuestionError,
+    AskError, CacheError, EnvError, InvalidChoice, InvalidImage, InvalidNoul, InvalidScore,
+    QuestionError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -7,6 +8,8 @@ use crate::{
 pub enum Error {
     #[error(transparent)]
     Question(#[from] QuestionError),
+    #[error(transparent)]
+    Image(#[from] InvalidImage),
     #[error(transparent)]
     Ask(#[from] AskError),
     #[error(transparent)]

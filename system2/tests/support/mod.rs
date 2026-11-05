@@ -266,3 +266,79 @@ pub(crate) fn noul_cache_line(state: &str, response: &Value) -> String {
     let line = json!({ "request_sha256": sha256_hex(&request), "response": response });
     format!("{line}\n")
 }
+
+// the start of a png that `Image::new` reads: its signature and its header chunk
+pub(crate) fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut header = [width.to_be_bytes(), height.to_be_bytes()].concat();
+    header.extend([8, 2, 0, 0, 0]);
+    [&b"\x89PNG\r\n\x1a\n"[..], &png_chunk(b"IHDR", &header)].concat()
+}
+
+// a png with an exif chunk that holds this orientation
+pub(crate) fn png_with_orientation(width: u32, height: u32, orientation: u16) -> Vec<u8> {
+    // little-endian tiff: the byte order, 42, the offset of the directory, and one entry with the
+    // tag, the type, the count, and the value of the orientation
+    let exif = [
+        &b"II\x2a\x00\x08\x00\x00\x00\x01\x00"[..],
+        b"\x12\x01\x03\x00\x01\x00\x00\x00",
+        &orientation.to_le_bytes(),
+        &[0, 0],
+    ]
+    .concat();
+    [png(width, height), png_chunk(b"eXIf", &exif)].concat()
+}
+
+fn png_chunk(chunk_type: &[u8], data: &[u8]) -> Vec<u8> {
+    let length = u32::try_from(data.len()).unwrap().to_be_bytes();
+    [&length[..], chunk_type, data, &[0; 4]].concat()
+}
+
+// the start of a jpeg that `Image::new` reads: its start and its frame header
+pub(crate) fn jpeg(width: u16, height: u16) -> Vec<u8> {
+    let mut frame = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 8];
+    frame.extend(height.to_be_bytes());
+    frame.extend(width.to_be_bytes());
+    frame.extend([3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1, 0xFF, 0xD9]);
+    frame
+}
+
+// the content type, and the headers and the content of each part, of a multipart request
+pub(crate) fn multipart(request: &Request) -> (String, Vec<(String, Vec<u8>)>) {
+    let content_type = request.headers["content-type"].to_str().unwrap().to_owned();
+    let boundary = content_type.split_once("boundary=").unwrap().1;
+    let body = zstd::decode_all(request.body.as_slice()).unwrap();
+    let start = format!("--{boundary}\r\n");
+    let end = format!("\r\n--{boundary}--\r\n");
+    let body = body
+        .strip_prefix(start.as_bytes())
+        .unwrap()
+        .strip_suffix(end.as_bytes())
+        .unwrap();
+    let separator = format!("\r\n--{boundary}\r\n");
+    let parts = split(body, separator.as_bytes())
+        .into_iter()
+        .map(|part| {
+            let end_of_headers = find(part, b"\r\n\r\n").unwrap();
+            let headers = String::from_utf8(part[..end_of_headers].to_vec()).unwrap();
+            (headers, part[end_of_headers + 4..].to_vec())
+        })
+        .collect();
+    (content_type, parts)
+}
+
+fn split<'a>(bytes: &'a [u8], separator: &[u8]) -> Vec<&'a [u8]> {
+    let mut pieces = Vec::new();
+    let mut rest = bytes;
+    while let Some(index) = find(rest, separator) {
+        pieces.push(&rest[..index]);
+        rest = &rest[index + separator.len()..];
+    }
+    pieces.push(rest);
+    pieces
+}
+
+fn find(bytes: &[u8], separator: &[u8]) -> Option<usize> {
+    bytes
+        .windows(separator.len())
+        .position(|window| window == separator)
+}

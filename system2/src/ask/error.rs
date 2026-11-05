@@ -25,6 +25,16 @@ pub enum AskError {
     Offline,
     #[error("the request has too many tokens{}", token_limit_fix(*long_context))]
     TokenLimit { long_context: bool },
+    #[error(
+        "the images of the request must have at most 32 MiB, not {size} bytes: \
+         split the request, or send smaller images"
+    )]
+    ByteLimit { size: usize },
+    #[error(
+        "the request refers to the image `{reference}`, and no `Image` holds it now: \
+         keep the `Image` until `ask` returns"
+    )]
+    MissingImage { reference: String },
     #[error("the response must arrive within the timeout: raise it with `Client::timeout`")]
     Timeout,
     #[error("the connection to the API failed: {0}")]

@@ -7,6 +7,7 @@
 mod ask;
 mod client;
 mod error;
+mod image;
 mod json;
 mod question;
 
@@ -16,6 +17,7 @@ pub use ask::{
 };
 pub use client::{CacheError, Client, Compression, EnvError};
 pub use error::{Error, Result};
+pub use image::{Image, InvalidImage};
 pub use json::InvalidJson;
 pub use question::{
     Choice, ChoiceAnswer, ChoiceOption, InvalidChoice, InvalidNoul, InvalidScore, Label, Levels,
@@ -26,8 +28,8 @@ pub use system2_macros::{Answers, Levels, Options, choice, noul, questions, scor
 pub mod prelude {
     #[doc(no_inline)]
     pub use crate::{
-        Answers, AskIterator, Levels, Options, QuestionSet, Questions, choice, noul, questions,
-        score,
+        Answers, AskIterator, Levels, Options, QuestionSet, Questions, choice, image, noul,
+        questions, score,
     };
 }
 
@@ -38,6 +40,7 @@ pub mod __private {
     };
     pub use crate::ask::questions::{SealedAnswers, question_set};
     pub use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+    pub use crate::image::{image_error, static_image};
     pub use crate::json::{AlwaysSerialize, Json, is_blank, to_json, unescaped};
     pub use crate::question::choice::{choice, owned_choice};
     pub use crate::question::noul::noul;

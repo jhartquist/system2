@@ -1,6 +1,7 @@
 mod cache;
 
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet};
+use crate::image::{self, Bytes};
 use crate::{AskError, AskFuture, AskWithReceiptFuture, QuestionSet, Receipt, Usage, json};
 use cache::{Cache, PendingLine};
 use reqwest::Url;
@@ -8,16 +9,15 @@ use reqwest::header::{
     AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, RETRY_AFTER,
 };
 use reqwest::redirect::Policy;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::value::RawValue;
-use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
-use std::{env, fmt, future};
+use std::{env, fmt, future, iter};
 use tokio::sync::Semaphore;
 use tracing::field::Empty;
 use tracing::{Instrument, Span, debug, info_span, trace, warn};
@@ -35,7 +35,10 @@ const LONGEST_RETRY_AFTER: Duration = Duration::from_secs(30);
 const JITTER: f64 = 0.25;
 const REQUEST_ID: &str = "x-typesafe-request-id";
 const RETRY_AFTER_MS: &str = "retry-after-ms";
-const LONG_CONTEXT: HeaderName = HeaderName::from_static("typesafe-danger-zone-long-context");
+const LONG_CONTEXT_HEADER: HeaderName =
+    HeaderName::from_static("typesafe-danger-zone-long-context");
+const IMAGES_HEADER: HeaderName = HeaderName::from_static("typesafe-danger-zone-images");
+const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 
 static GLOBAL: Mutex<Option<Client>> = Mutex::new(None);
 
@@ -225,10 +228,15 @@ impl Client {
         }
 
         // serialize now, so the future does not borrow the state
-        let body = match state {
-            Ok(state) => self.request_body(&raw_question_set, &state),
+        let state = match state {
+            Ok(state) => state,
             Err(error) => return AskFuture::new(question_set, future::ready(Err(error))),
         };
+
+        // looked up now, so the caller can drop an `Image` once `ask` returns
+        let references = image::references(iter::once(state.get()).chain(raw_question_set.texts()));
+        let images = find_images(&references);
+        let body = self.request_body(&raw_question_set, &state, &references);
         let request_sha256 = cache::sha256(body.as_bytes());
         let span = info_span!(
             "ask",
@@ -244,7 +252,10 @@ impl Client {
             system2.latency_ms = Empty,
             system2.request_id = Empty,
         );
-        let request = self.clone().send(body, request_sha256).instrument(span);
+        let request = self
+            .clone()
+            .send(body, request_sha256, images)
+            .instrument(span);
         AskFuture::new(question_set, request)
     }
 
@@ -257,10 +268,18 @@ impl Client {
     }
 
     // answers from the cache when it has the request, otherwise sends the request to the api
-    async fn send(self, body: String, request_sha256: [u8; 32]) -> Result<Response, AskError> {
+    async fn send(
+        self,
+        body: String,
+        request_sha256: [u8; 32],
+        images: Result<Vec<(String, Bytes)>, AskError>,
+    ) -> Result<Response, AskError> {
         if self.trace_bodies {
             trace!(target: "system2::body", { system2.body = body }, "body");
         }
+
+        // before the cache, so a run from the cache fails where a live run does
+        let images = images?;
 
         if let Some(cache) = &self.cache
             && let Some(response) = cache.get(&request_sha256)
@@ -287,7 +306,7 @@ impl Client {
             return Err(AskError::Offline);
         }
 
-        let (text, request_id, latency) = self.post(body.as_bytes()).await?;
+        let (text, request_id, latency) = self.post(body, request_sha256, &images).await?;
         let json = parse_json(&text, request_id.as_deref())?;
         let usage = read_usage(&json, request_id.as_deref())?;
 
@@ -315,12 +334,25 @@ impl Client {
 
     // the text, the request ID, and the latency of the response, after the retries
     #[expect(clippy::expect_used, reason = "the client never closes its limit")]
-    async fn post(&self, body: &[u8]) -> Result<(String, Option<String>, Duration), AskError> {
+    async fn post(
+        &self,
+        body: String,
+        request_sha256: [u8; 32],
+        images: &[(String, Bytes)],
+    ) -> Result<(String, Option<String>, Duration), AskError> {
         let url = self.endpoint()?;
-        let headers = self.headers()?;
+
+        // the hash of the json, which no part of the body can hold
+        let boundary = (!images.is_empty()).then(|| hex::encode(request_sha256));
+        let headers = self.headers(boundary.as_deref())?;
+        let body = match &boundary {
+            Some(boundary) => multipart(boundary, &body, images)?,
+            None => body.into_bytes(),
+        };
+
         let body = match self.compression {
-            Compression::None => Cow::Borrowed(body),
-            Compression::Zstd => Cow::Owned(compress(body)),
+            Compression::None => body,
+            Compression::Zstd => compress(&body),
         };
 
         // held through the retries, and a drop of the future gives it back
@@ -406,15 +438,25 @@ impl Client {
         self.usage.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn headers(&self) -> Result<HeaderMap, AskError> {
+    // a boundary for a multipart body, which a request with images has
+    fn headers(&self, boundary: Option<&str>) -> Result<HeaderMap, AskError> {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, self.authorization()?);
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        let content_type = match boundary {
+            Some(boundary) => content_type_for(boundary),
+            None => HeaderValue::from_static("application/json"),
+        };
+        headers.insert(CONTENT_TYPE, content_type);
+
+        if boundary.is_some() {
+            headers.insert(IMAGES_HEADER, HeaderValue::from_static("true"));
+        }
         if self.compression == Compression::Zstd {
             headers.insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
         }
         if self.long_context {
-            headers.insert(LONG_CONTEXT, HeaderValue::from_static("true"));
+            headers.insert(LONG_CONTEXT_HEADER, HeaderValue::from_static("true"));
         }
         Ok(headers)
     }
@@ -428,12 +470,18 @@ impl Client {
         clippy::expect_used,
         reason = "each part is validated json or text, with text keys"
     )]
-    fn request_body(&self, raw_question_set: &RawQuestionSet, state: &RawValue) -> String {
+    fn request_body(
+        &self,
+        raw_question_set: &RawQuestionSet,
+        state: &RawValue,
+        references: &BTreeSet<String>,
+    ) -> String {
         let model = &self.model;
         serde_json::to_string(&RequestBody {
             model,
             state,
             questions: raw_question_set,
+            assets: Assets(references),
         })
         .expect("the body serializes")
     }
@@ -515,12 +563,84 @@ struct RequestBody<'a> {
     model: &'a str,
     state: &'a RawValue,
     questions: &'a RawQuestionSet,
+    #[serde(skip_serializing_if = "Assets::is_empty")]
+    assets: Assets<'a>,
+}
+
+// the part of each image, by its reference
+struct Assets<'a>(&'a BTreeSet<String>);
+
+impl Assets<'_> {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl Serialize for Assets<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Asset<'a> {
+            part: &'a str,
+        }
+        let assets = self
+            .0
+            .iter()
+            .map(|reference| (reference, Asset { part: reference }));
+        serializer.collect_map(assets)
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct ResponseBody {
     model: Option<String>,
     answers: HashMap<String, Value>,
+}
+
+fn find_images(references: &BTreeSet<String>) -> Result<Vec<(String, Bytes)>, AskError> {
+    references
+        .iter()
+        .map(|reference| match image::find(reference) {
+            Some(bytes) => Ok((reference.clone(), bytes)),
+            None => Err(AskError::MissingImage {
+                reference: reference.clone(),
+            }),
+        })
+        .collect()
+}
+
+#[expect(clippy::expect_used, reason = "a boundary is hex digits")]
+fn content_type_for(boundary: &str) -> HeaderValue {
+    HeaderValue::try_from(format!("multipart/form-data; boundary={boundary}"))
+        .expect("the content type is a header value")
+}
+
+// by hand, as reqwest sends a form as a stream, and zstd compresses the whole body
+fn multipart(boundary: &str, json: &str, images: &[(String, Bytes)]) -> Result<Vec<u8>, AskError> {
+    let size = images.iter().map(|(_, bytes)| bytes.as_slice().len()).sum();
+    if size > MAX_IMAGE_BYTES {
+        return Err(AskError::ByteLimit { size });
+    }
+
+    let mut body = Vec::new();
+    let request_headers =
+        "Content-Disposition: form-data; name=\"request\"\r\nContent-Type: application/json";
+    add_part(&mut body, boundary, request_headers, json.as_bytes());
+
+    for (reference, bytes) in images {
+        let headers = format!(
+            "Content-Disposition: form-data; name=\"{reference}\"; filename=\"{reference}\""
+        );
+        add_part(&mut body, boundary, &headers, bytes.as_slice());
+    }
+
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Ok(body)
+}
+
+fn add_part(body: &mut Vec<u8>, boundary: &str, headers: &str, content: &[u8]) {
+    body.extend_from_slice(format!("--{boundary}\r\n{headers}\r\n\r\n").as_bytes());
+    body.extend_from_slice(content);
+    body.extend_from_slice(b"\r\n");
 }
 
 fn var(name: &str) -> Option<String> {
@@ -708,8 +828,8 @@ impl fmt::Debug for Client {
 #[cfg(test)]
 mod tests {
     use super::{
-        Client, Compression, REQUEST_ID, ResponseBody, backoff, jitter, parse_json, read_response,
-        read_usage, request_id, retry_after, retry_wait,
+        BTreeSet, Bytes, Client, Compression, REQUEST_ID, ResponseBody, backoff, jitter, multipart,
+        parse_json, read_response, read_usage, request_id, retry_after, retry_wait,
     };
     use crate::AskError;
     use crate::ask::wire::RawQuestionSet;
@@ -769,12 +889,86 @@ mod tests {
         let state = raw(r#"{"text":"Buy now!","from":"a"}"#);
 
         assert_eq!(
-            client.request_body(&raw_question_set, &state),
+            client.request_body(&raw_question_set, &state, &BTreeSet::new()),
             concat!(
                 r#"{"model":"jev-1.14.0","state":{"text":"Buy now!","from":"a"},"#,
                 r#""questions":{"q0":{"type":"noul","instructions":"Is it spam?"}}}"#,
             )
         );
+    }
+
+    #[test]
+    fn request_body_maps_each_reference_to_its_part() {
+        let client = Client::new().model("jev-1.14.0");
+        let mut raw_question_set = RawQuestionSet::default();
+        raw_question_set.push(&raw(r#"{"type":"noul","instructions":"Is it red?"}"#));
+        let state = raw(r#""s2-img-0123456789abcdef and s2-img-fedcba9876543210""#);
+        let references = BTreeSet::from(
+            ["s2-img-fedcba9876543210", "s2-img-0123456789abcdef"].map(str::to_owned),
+        );
+
+        assert_eq!(
+            client.request_body(&raw_question_set, &state, &references),
+            concat!(
+                r#"{"model":"jev-1.14.0","#,
+                r#""state":"s2-img-0123456789abcdef and s2-img-fedcba9876543210","#,
+                r#""questions":{"q0":{"type":"noul","instructions":"Is it red?"}},"#,
+                r#""assets":{"s2-img-0123456789abcdef":{"part":"s2-img-0123456789abcdef"},"#,
+                r#""s2-img-fedcba9876543210":{"part":"s2-img-fedcba9876543210"}}}"#,
+            )
+        );
+    }
+
+    #[test]
+    fn multipart_puts_the_json_then_each_image_in_a_part() {
+        let images = [
+            (
+                "s2-img-0123456789abcdef".to_owned(),
+                Bytes::Static(b"\x89PNG"),
+            ),
+            (
+                "s2-img-fedcba9876543210".to_owned(),
+                Bytes::Static(b"\xFF\xD8"),
+            ),
+        ];
+
+        let body = multipart("b0", r#"{"model":"jev-latest"}"#, &images).unwrap();
+
+        let expected = [
+            &b"--b0\r\n"[..],
+            b"Content-Disposition: form-data; name=\"request\"\r\n",
+            b"Content-Type: application/json\r\n\r\n",
+            br#"{"model":"jev-latest"}"#,
+            b"\r\n--b0\r\n",
+            b"Content-Disposition: form-data; name=\"s2-img-0123456789abcdef\"; ",
+            b"filename=\"s2-img-0123456789abcdef\"\r\n\r\n",
+            b"\x89PNG",
+            b"\r\n--b0\r\n",
+            b"Content-Disposition: form-data; name=\"s2-img-fedcba9876543210\"; ",
+            b"filename=\"s2-img-fedcba9876543210\"\r\n\r\n",
+            b"\xFF\xD8",
+            b"\r\n--b0--\r\n",
+        ]
+        .concat();
+        assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn multipart_refuses_images_over_32_mib() {
+        let bytes: &'static [u8] = vec![0; 16 * 1024 * 1024 + 1].leak();
+        let images = [
+            ("s2-img-0123456789abcdef".to_owned(), Bytes::Static(bytes)),
+            (
+                "s2-img-fedcba9876543210".to_owned(),
+                Bytes::Static(&bytes[1..]),
+            ),
+        ];
+
+        let error = multipart("b0", "{}", &images).unwrap_err();
+
+        assert!(matches!(error, AskError::ByteLimit { size: 33_554_433 }));
+        let at_the_limit = [images[1].clone(), images[1].clone()];
+        assert!(multipart("b0", "{}", &at_the_limit).is_ok());
     }
 
     #[test]

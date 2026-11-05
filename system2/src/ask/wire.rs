@@ -38,7 +38,6 @@ impl RawQuestionSet {
         self.questions.is_empty()
     }
 
-    #[cfg(test)]
     pub(crate) fn texts(&self) -> Vec<&str> {
         self.questions
             .iter()

@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::env;
 use system2::prelude::*;
-use system2::{AskError, Choice, Client, Score};
+use system2::{AskError, Choice, Client, Image, Score};
 
 const RECORDING: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/live.jsonl");
 
@@ -139,6 +139,18 @@ async fn ask_takes_json_in_each_slot() -> system2::Result<()> {
 }
 
 // about 40k tokens, over the limit of the state and the longest question
+const RED: Image = image!("images/red.png");
+
+#[tokio::test]
+async fn ask_sends_an_image_in_place_of_its_reference() -> system2::Result<()> {
+    let red = replay()?
+        .ask(noul!("Is the image mostly red?"), &RED)
+        .await?;
+
+    assert!(red.is_likely());
+    Ok(())
+}
+
 fn over_the_default_limit() -> String {
     "word ".repeat(40_000)
 }

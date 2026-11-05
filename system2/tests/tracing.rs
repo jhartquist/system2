@@ -12,10 +12,10 @@ use std::fmt;
 use std::sync::Once;
 use support::{
     INSTRUCTIONS, STATE, answer_set_response, cache_path, client_for, mock_api, mock_api_then,
-    noul, noul_answer, noul_response, only_request, partial_api, request_text, response,
-    sha256_hex,
+    multipart, noul, noul_answer, noul_response, only_request, partial_api, png, request_text,
+    response, sha256_hex,
 };
-use system2::{AskError, Client, Compression, Noul};
+use system2::{AskError, Client, Compression, Image, Noul};
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Level, Subscriber};
@@ -358,4 +358,28 @@ async fn trace_bodies_traces_each_body_with_its_own_target() {
             assert!(bodies.is_empty());
         }
     }
+}
+
+#[tokio::test]
+async fn trace_bodies_traces_the_json_of_a_request_with_an_image() {
+    capture();
+    let server = mock_api(noul_response(0.92)).await;
+    let image = Image::new(png(600, 600)).unwrap();
+    let state = format!("A photo: {image}");
+
+    client_for(&server)
+        .trace_bodies(true)
+        .ask(nouls(&[INSTRUCTIONS]), state.as_str())
+        .await
+        .unwrap();
+
+    let (_, parts) = multipart(&only_request(&server).await);
+    let json = String::from_utf8(parts[0].1.clone()).unwrap();
+    let [span] = traced_spans().try_into().unwrap();
+    let traced_body = span
+        .events
+        .iter()
+        .find(|event| event.target == "system2::body")
+        .unwrap();
+    assert_eq!(traced_body.fields.0["system2.body"], json);
 }

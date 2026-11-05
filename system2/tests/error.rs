@@ -3,8 +3,8 @@ mod support;
 use std::path::Path;
 use support::{INSTRUCTIONS, cache_path, client_for, mock_api, noul_response};
 use system2::{
-    AskError, CacheError, Choice, Client, Error, InvalidChoice, InvalidJson, InvalidNoul,
-    InvalidScore, Noul, NoulAnswer, QuestionError, Score,
+    AskError, CacheError, Choice, Client, Error, Image, InvalidChoice, InvalidImage, InvalidJson,
+    InvalidNoul, InvalidScore, Noul, NoulAnswer, QuestionError, Score,
 };
 use wiremock::MockServer;
 
@@ -41,6 +41,10 @@ fn questions_or_error(
 
 fn questions_of_a_set() -> system2::Result<Questions> {
     Ok(questions("", OPTIONS, LEVELS)?)
+}
+
+fn image(bytes: &[u8]) -> system2::Result<Image> {
+    Ok(Image::new(bytes.to_vec())?)
 }
 
 fn cached_client(path: &Path) -> system2::Result<Client> {
@@ -85,6 +89,7 @@ async fn error_takes_each_error_that_a_function_returns() {
     let choice = questions_or_error(INSTRUCTIONS, &["spam", "spam"], LEVELS).unwrap_err();
     let score = questions_or_error(INSTRUCTIONS, OPTIONS, &[]).unwrap_err();
     let question = questions_of_a_set().unwrap_err();
+    let image = image(b"GIF89a").unwrap_err();
     let ask = ask_with_no_state(&server).await.unwrap_err();
     let missing_folder = cache_path("error").with_extension("");
     let cache = cached_client(&missing_folder.join("cache.jsonl")).unwrap_err();
@@ -105,6 +110,7 @@ async fn error_takes_each_error_that_a_function_returns() {
         question,
         Error::Question(QuestionError::Noul(InvalidNoul::Instructions(_)))
     ));
+    assert!(matches!(image, Error::Image(InvalidImage::Format)));
     assert!(matches!(
         ask,
         Error::Ask(AskError::State(InvalidJson::Empty))
