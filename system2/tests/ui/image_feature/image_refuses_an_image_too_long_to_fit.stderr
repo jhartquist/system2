@@ -1,0 +1,5 @@
+error: the long side of the image must be at most 5.6 times its short side, not 1700x300: crop it
+ --> tests/ui/image_feature/image_refuses_an_image_too_long_to_fit.rs:4:30
+  |
+4 | const BANNER: Image = image!("../../images/long.png");
+  |                              ^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,17 @@
+[package]
+name = "system2-shared"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The code that system2 and its macros share. It is not a public API."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jhartquist/system2"
+
+[lints]
+workspace = true
+
+[features]
+image = ["dep:image"]
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["gif", "jpeg", "png", "webp"], optional = true }

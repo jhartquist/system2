@@ -5,9 +5,8 @@ mod support;
 use serde_json::{Value, json};
 use support::{
     client_for, jpeg, mock_api, multipart, no_request_sent, noul_response, only_request, png,
-    png_with_orientation,
 };
-use system2::{AskError, Image, InvalidImage, image, noul};
+use system2::{AskError, Image, image, noul};
 
 const RED: Image = image!("images/red.png");
 const RED_BYTES: &[u8] = include_bytes!("images/red.png");
@@ -23,6 +22,7 @@ fn new_reads_the_size_of_a_png_and_a_jpeg() {
 }
 
 #[test]
+#[cfg(not(feature = "image"))]
 fn new_refuses_an_invalid_image() {
     let mut too_large = png(300, 300);
     too_large.resize(16 * 1024 * 1024 + 1, 0);
@@ -46,7 +46,7 @@ fn new_refuses_an_invalid_image() {
              turn on the `image` feature of system2 to make it smaller",
         ),
         (
-            png_with_orientation(400, 300, 6),
+            support::png_with_orientation(400, 300, 6),
             "the image must be upright, but its EXIF orientation 6 turns or mirrors it, and the \
              API ignores the orientation: turn on the `image` feature of system2 to turn its \
              pixels",
@@ -60,6 +60,7 @@ fn new_refuses_an_invalid_image() {
 }
 
 #[test]
+#[cfg(not(feature = "image"))]
 fn new_takes_each_side_from_280_to_1568_px() {
     for (width, height) in [(280, 1568), (1568, 280)] {
         let image = Image::new(png(width, height)).unwrap();
@@ -69,7 +70,7 @@ fn new_takes_each_side_from_280_to_1568_px() {
     let error = Image::new(png(1569, 280)).unwrap_err();
     assert!(matches!(
         error,
-        InvalidImage::Size {
+        system2::InvalidImage::Size {
             width: 1569,
             height: 280
         }

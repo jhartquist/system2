@@ -1,0 +1,7 @@
+error[E0080]: evaluation panicked: each side of the image must be from 280 to 1568 px: pass a path to `image!`, or call `Image::new`, to scale it
+ --> tests/ui/image_feature/image_refuses_a_constant_that_it_cannot_convert.rs:6:21
+  |
+6 | const LOGO: Image = image!(BYTES);
+  |                     ^^^^^^^^^^^^^ evaluation of `LOGO::{constant#1}` failed here
+  |
+  = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `image` (in Nightly builds, run with -Z macro-backtrace for more info)

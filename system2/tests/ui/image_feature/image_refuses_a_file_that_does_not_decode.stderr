@@ -1,0 +1,5 @@
+error: the image must be a valid PNG, JPEG, WebP, or GIF: The image format could not be determined
+ --> tests/ui/image_feature/image_refuses_a_file_that_does_not_decode.rs:4:28
+  |
+4 | const LOGO: Image = image!("image_refuses_a_file_that_does_not_decode.rs");
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -89,7 +89,7 @@ async fn error_takes_each_error_that_a_function_returns() {
     let choice = questions_or_error(INSTRUCTIONS, &["spam", "spam"], LEVELS).unwrap_err();
     let score = questions_or_error(INSTRUCTIONS, OPTIONS, &[]).unwrap_err();
     let question = questions_of_a_set().unwrap_err();
-    let image = image(b"GIF89a").unwrap_err();
+    let image = image(include_bytes!("images/long.png")).unwrap_err();
     let ask = ask_with_no_state(&server).await.unwrap_err();
     let missing_folder = cache_path("error").with_extension("");
     let cache = cached_client(&missing_folder.join("cache.jsonl")).unwrap_err();
@@ -110,7 +110,7 @@ async fn error_takes_each_error_that_a_function_returns() {
         question,
         Error::Question(QuestionError::Noul(InvalidNoul::Instructions(_)))
     ));
-    assert!(matches!(image, Error::Image(InvalidImage::Format)));
+    assert!(matches!(image, Error::Image(InvalidImage::Size { .. })));
     assert!(matches!(
         ask,
         Error::Ask(AskError::State(InvalidJson::Empty))

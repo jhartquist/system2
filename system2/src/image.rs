@@ -1,14 +1,15 @@
-mod header;
 mod registry;
 
 use crate::json::AlwaysSerialize;
-use header::{Header, HeaderError, read_header};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
+#[cfg(feature = "image")]
+use system2_shared::image::ConvertError;
+use system2_shared::image::{Header, HeaderError, read_header};
 
 pub(crate) use registry::find;
 
@@ -25,6 +26,8 @@ pub struct Image {
 impl Image {
     pub fn new(bytes: impl Into<Vec<u8>>) -> Result<Self, InvalidImage> {
         let bytes = bytes.into();
+        #[cfg(feature = "image")]
+        let bytes = system2_shared::image::convert(&bytes)?.unwrap_or(bytes);
         let Header { width, height } = read_header(&bytes)?;
         let reference = reference_of(&bytes);
         let shared = registry::register(Shared { reference, bytes })?;
@@ -66,9 +69,19 @@ pub enum InvalidImage {
     Format,
     #[error("the image must have a complete PNG or JPEG header")]
     Header,
-    #[error(
-        "each side of the image must be from 280 to 1568 px, not {width}x{height}: \
-         turn on the `image` feature of system2 to scale it"
+    #[cfg_attr(
+        not(feature = "image"),
+        error(
+            "each side of the image must be from 280 to 1568 px, not {width}x{height}: \
+             turn on the `image` feature of system2 to scale it"
+        )
+    )]
+    #[cfg_attr(
+        feature = "image",
+        error(
+            "the long side of the image must be at most 5.6 times its short side, \
+             not {width}x{height}: crop it"
+        )
     )]
     Size { width: u32, height: u32 },
     #[error(
@@ -87,6 +100,9 @@ pub enum InvalidImage {
          `{reference}`: change a byte of one of them"
     )]
     Reference { reference: String },
+    #[cfg(feature = "image")]
+    #[error("the image must be a valid PNG, JPEG, WebP, or GIF")]
+    Decode(#[from] ::image::ImageError),
 }
 
 // the bytes of a file from `image!`, or of an image from run time
@@ -199,7 +215,7 @@ pub const fn static_image(bytes: &'static [u8]) -> Image {
 #[macro_export]
 macro_rules! image {
     ($path:literal) => {
-        $crate::image!(::core::include_bytes!($path))
+        $crate::image!($crate::__private::include_image!($path))
     };
 
     // the length of an array is a constant, so `cargo check` validates the image
@@ -226,6 +242,35 @@ impl From<HeaderError> for InvalidImage {
             HeaderError::Bytes { size } => InvalidImage::Bytes { size },
             HeaderError::Orientation { orientation } => InvalidImage::Orientation { orientation },
         }
+    }
+}
+
+#[cfg(feature = "image")]
+impl From<ConvertError> for InvalidImage {
+    fn from(error: ConvertError) -> Self {
+        match error {
+            ConvertError::Decode(error) => InvalidImage::Decode(error),
+            ConvertError::Size { width, height } => InvalidImage::Size { width, height },
+        }
+    }
+}
+
+#[cfg(feature = "image")]
+impl TryFrom<::image::DynamicImage> for Image {
+    type Error = InvalidImage;
+
+    fn try_from(dynamic_image: ::image::DynamicImage) -> Result<Self, Self::Error> {
+        let bytes = system2_shared::image::encode(&dynamic_image, None)?;
+        Image::new(bytes)
+    }
+}
+
+#[cfg(feature = "image")]
+impl TryFrom<&Image> for ::image::DynamicImage {
+    type Error = InvalidImage;
+
+    fn try_from(image: &Image) -> Result<Self, Self::Error> {
+        Ok(::image::load_from_memory(image.bytes.as_slice())?)
     }
 }
 
@@ -257,7 +302,7 @@ impl AlwaysSerialize for Image {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Image, image_error, references, static_image};
+    use super::{HeaderError, Image, InvalidImage, image_error, references, static_image};
     use std::collections::BTreeSet;
 
     #[test]
@@ -279,16 +324,40 @@ mod tests {
     }
 
     #[test]
+    fn from_keeps_the_values_of_a_header_error() {
+        let format = InvalidImage::from(HeaderError::Format);
+        let header = InvalidImage::from(HeaderError::Header);
+        let size = InvalidImage::from(HeaderError::Size {
+            width: 279,
+            height: 300,
+        });
+        let bytes = InvalidImage::from(HeaderError::Bytes { size: 17 });
+        let orientation = InvalidImage::from(HeaderError::Orientation { orientation: 6 });
+
+        assert!(matches!(format, InvalidImage::Format));
+        assert!(matches!(header, InvalidImage::Header));
+        assert!(matches!(
+            size,
+            InvalidImage::Size {
+                width: 279,
+                height: 300
+            }
+        ));
+        assert!(matches!(bytes, InvalidImage::Bytes { size: 17 }));
+        assert!(matches!(
+            orientation,
+            InvalidImage::Orientation { orientation: 6 }
+        ));
+    }
+
+    #[test]
     fn image_error_gives_the_message_of_an_invalid_image() {
         let red = include_bytes!("../tests/images/red.png");
 
         assert_eq!(image_error(red), None);
         assert_eq!(
-            image_error(b"GIF89a"),
-            Some(
-                "the image must be PNG or JPEG: \
-                 turn on the `image` feature of system2 to convert it"
-            )
+            image_error(b"\x89PNG\r\n\x1a\n"),
+            Some("the image must have a complete PNG or JPEG header")
         );
     }
 

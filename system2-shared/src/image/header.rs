@@ -1,8 +1,8 @@
 // the readers are `const fn`, so `image!` validates a file by the rules of `Image::new`, and a
 // `const fn` cannot take a range of a slice, so they take offsets
 
-const MIN_SIDE: u32 = 280;
-const MAX_SIDE: u32 = 1568;
+pub(crate) const MIN_SIDE: u32 = 280;
+pub(crate) const MAX_SIDE: u32 = 1568;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -19,14 +19,14 @@ const UPRIGHT: u16 = 1;
 const TIFF_ENTRY: usize = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Header {
-    pub(super) width: u32,
-    pub(super) height: u32,
+pub struct Header {
+    pub width: u32,
+    pub height: u32,
 }
 
 // `Copy`, so a constant can drop it
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum HeaderError {
+pub enum HeaderError {
     Format,
     Header,
     Size { width: u32, height: u32 },
@@ -34,33 +34,49 @@ pub(super) enum HeaderError {
     Orientation { orientation: u16 },
 }
 
+// with the feature, `image!` converts a file, but it cannot read the value of a constant
+#[cfg(not(feature = "image"))]
+macro_rules! fix {
+    ($action:literal) => {
+        concat!("turn on the `image` feature of system2 to ", $action)
+    };
+}
+
+#[cfg(feature = "image")]
+macro_rules! fix {
+    ($action:literal) => {
+        concat!(
+            "pass a path to `image!`, or call `Image::new`, to ",
+            $action
+        )
+    };
+}
+
 impl HeaderError {
     // a panic in a constant takes no numbers, so the message of `image!` has none
-    pub(super) const fn message(self) -> &'static str {
+    #[must_use]
+    pub const fn message(self) -> &'static str {
         match self {
-            HeaderError::Format => {
-                "the image must be PNG or JPEG: \
-                 turn on the `image` feature of system2 to convert it"
-            }
+            HeaderError::Format => concat!("the image must be PNG or JPEG: ", fix!("convert it")),
             HeaderError::Header => "the image must have a complete PNG or JPEG header",
-            HeaderError::Size { .. } => {
-                "each side of the image must be from 280 to 1568 px: \
-                 turn on the `image` feature of system2 to scale it"
-            }
-            HeaderError::Bytes { .. } => {
-                "the image must have at most 16 MiB: \
-                 turn on the `image` feature of system2 to make it smaller"
-            }
-            HeaderError::Orientation { .. } => {
+            HeaderError::Size { .. } => concat!(
+                "each side of the image must be from 280 to 1568 px: ",
+                fix!("scale it")
+            ),
+            HeaderError::Bytes { .. } => concat!(
+                "the image must have at most 16 MiB: ",
+                fix!("make it smaller")
+            ),
+            HeaderError::Orientation { .. } => concat!(
                 "the image must be upright, but its EXIF orientation turns or mirrors it, and the \
-                 API ignores the orientation: turn on the `image` feature of system2 to turn its \
-                 pixels"
-            }
+                 API ignores the orientation: ",
+                fix!("turn its pixels")
+            ),
         }
     }
 }
 
-pub(super) const fn read_header(bytes: &[u8]) -> Result<Header, HeaderError> {
+pub const fn read_header(bytes: &[u8]) -> Result<Header, HeaderError> {
     if bytes.len() > MAX_BYTES {
         let size = bytes.len();
         return Err(HeaderError::Bytes { size });
@@ -88,7 +104,7 @@ pub(super) const fn read_header(bytes: &[u8]) -> Result<Header, HeaderError> {
     }
 }
 
-const fn fits(side: u32) -> bool {
+pub(crate) const fn fits(side: u32) -> bool {
     side >= MIN_SIDE && side <= MAX_SIDE
 }
 
@@ -490,15 +506,19 @@ mod tests {
             HeaderError::Bytes { size: 1 },
             HeaderError::Orientation { orientation: 6 },
         ];
+        #[cfg(not(feature = "image"))]
+        let fix = "turn on the `image` feature of system2 to";
+        #[cfg(feature = "image")]
+        let fix = "pass a path to `image!`, or call `Image::new`, to";
         let messages = [
-            "the image must be PNG or JPEG: turn on the `image` feature of system2 to convert it",
-            "the image must have a complete PNG or JPEG header",
-            "each side of the image must be from 280 to 1568 px: \
-             turn on the `image` feature of system2 to scale it",
-            "the image must have at most 16 MiB: \
-             turn on the `image` feature of system2 to make it smaller",
-            "the image must be upright, but its EXIF orientation turns or mirrors it, and the API \
-             ignores the orientation: turn on the `image` feature of system2 to turn its pixels",
+            format!("the image must be PNG or JPEG: {fix} convert it"),
+            "the image must have a complete PNG or JPEG header".to_owned(),
+            format!("each side of the image must be from 280 to 1568 px: {fix} scale it"),
+            format!("the image must have at most 16 MiB: {fix} make it smaller"),
+            format!(
+                "the image must be upright, but its EXIF orientation turns or mirrors it, and the \
+                 API ignores the orientation: {fix} turn its pixels"
+            ),
         ];
         assert_eq!(errors.map(HeaderError::message), messages);
     }

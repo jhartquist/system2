@@ -62,7 +62,7 @@ async fn main() -> system2::Result<()> {
   - [x] cache
   - [x] token counts
   - [x] tracing
-- [ ] images
+- [x] images
 - [ ] docs
   - [ ] rustdoc
   - [ ] examples

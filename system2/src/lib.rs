@@ -45,5 +45,9 @@ pub mod __private {
     pub use crate::question::choice::{choice, owned_choice};
     pub use crate::question::noul::noul;
     pub use crate::question::score::score;
+    #[cfg(not(feature = "image"))]
+    pub use core::include_bytes as include_image;
     pub use serde;
+    #[cfg(feature = "image")]
+    pub use system2_macros::include_image;
 }

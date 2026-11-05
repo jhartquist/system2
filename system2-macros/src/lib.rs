@@ -3,6 +3,8 @@
 mod answers;
 mod choice;
 mod derive;
+#[cfg(feature = "image")]
+mod image;
 mod json;
 mod noul;
 mod part;
@@ -35,6 +37,14 @@ pub fn score(input: TokenStream) -> TokenStream {
 pub fn questions(input: TokenStream) -> TokenStream {
     let questions = parse_macro_input!(input as questions::Questions);
     questions.into_token_stream().into()
+}
+
+#[cfg(feature = "image")]
+#[doc(hidden)]
+#[proc_macro]
+pub fn include_image(input: TokenStream) -> TokenStream {
+    let path = parse_macro_input!(input as syn::LitStr);
+    image::include_image(&path).into()
 }
 
 #[proc_macro_derive(Options, attributes(system2))]

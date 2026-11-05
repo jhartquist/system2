@@ -1,5 +1,5 @@
 error[E0080]: evaluation panicked: the image must be upright, but its EXIF orientation turns or mirrors it, and the API ignores the orientation: turn on the `image` feature of system2 to turn its pixels
- --> tests/ui/image_refuses_a_turned_image.rs:7:21
+ --> tests/ui/no_image_feature/image_refuses_a_turned_image.rs:7:21
   |
 7 | const LOGO: Image = image!(BYTES);
   |                     ^^^^^^^^^^^^^ evaluation of `LOGO::{constant#1}` failed here

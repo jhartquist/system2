@@ -293,6 +293,14 @@ fn png_chunk(chunk_type: &[u8], data: &[u8]) -> Vec<u8> {
     [&length[..], chunk_type, data, &[0; 4]].concat()
 }
 
+// a whole image in this format, from the `image` crate
+#[cfg(feature = "image")]
+pub(crate) fn encoded(image: &image::DynamicImage, format: image::ImageFormat) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut bytes, format).unwrap();
+    bytes.into_inner()
+}
+
 // the start of a jpeg that `Image::new` reads: its start and its frame header
 pub(crate) fn jpeg(width: u16, height: u16) -> Vec<u8> {
     let mut frame = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 8];
