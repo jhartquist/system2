@@ -1,7 +1,0 @@
-error: couldn't read `$DIR/tests/ui/image_feature/missing.png`: No such file or directory (os error 2)
- --> tests/ui/image_feature/image_refuses_a_file_that_it_cannot_read.rs:3:21
-  |
-3 | const LOGO: Image = image!("missing.png");
-  |                     ^^^^^^^^^^^^^^^^^^^^^
-  |
-  = note: this error originates in the macro `::core::include_bytes` which comes from the expansion of the macro `image` (in Nightly builds, run with -Z macro-backtrace for more info)
