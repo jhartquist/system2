@@ -39,11 +39,11 @@ async fn main() -> system2::Result<()> {
 
 ## Roadmap
 
-- [ ] question types
+- [x] question types
   - [x] `Noul`
   - [x] `Choice`
   - [x] `Score`
-  - [ ] `Bbox`
+  - [x] `Bbox`
 - [x] enums as options and levels
 - [x] question sets
   - [x] tuples
@@ -66,6 +66,7 @@ async fn main() -> system2::Result<()> {
 - [ ] docs
   - [ ] rustdoc
   - [ ] examples
+    - [x] `find_in_image`
   - [ ] cookbook ports
     - [x] `citation_check`
     - [ ] `hierarchical_classification`

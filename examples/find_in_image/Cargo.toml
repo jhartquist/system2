@@ -1,0 +1,23 @@
+[package]
+name = "find_in_image"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[lints]
+workspace = true
+
+# a run with no features keeps `system2` with no features in the whole workspace
+[features]
+image = ["dep:image", "system2/image"]
+
+[[bin]]
+name = "find_in_image"
+path = "src/main.rs"
+required-features = ["image"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"], optional = true }
+system2 = { path = "../../system2" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

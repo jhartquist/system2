@@ -55,6 +55,23 @@ jobs:
             --fail-under-lines 100 \
             --fail-under-functions 100
 
+  examples:
+    runs-on: ubuntu-latest
+    env:
+      SYSTEM2_OFFLINE: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Replay find_in_image from its recording
+        env:
+          SYSTEM2_CACHE: examples/find_in_image/responses.jsonl
+        run: |
+          cargo run -p find_in_image --features image -- \
+            examples/find_in_image/data/desk.jpg "the coffee cup" draw target/cup.jpg
+          cargo run -p find_in_image --features image -- \
+            examples/find_in_image/data/desk.jpg "a cat" draw target/cat.jpg
+
   deny:
     runs-on: ubuntu-latest
     steps:

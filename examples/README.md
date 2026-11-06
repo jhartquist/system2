@@ -3,6 +3,13 @@
 Each example is a crate of its own. Run one with `cargo run -p <name>`. The examples read
 `TYPESAFE_API_KEY` from the environment.
 
+## Short examples
+
+Each one shows one area of the API.
+
+- [`find_in_image`](find_in_image): finds an object in a photo, and writes a crop of it or a
+  rectangle around it. It needs `--features image`.
+
 ## Cookbook ports
 
 Ports of [TypeSafe cookbooks](https://docs.typesafe.ai/cookbooks), with their data.
