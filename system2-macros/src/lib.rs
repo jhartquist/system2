@@ -4,7 +4,6 @@ mod answers;
 mod bbox;
 mod choice;
 mod derive;
-#[cfg(feature = "image")]
 mod image;
 mod json;
 mod noul;
@@ -46,7 +45,6 @@ pub fn questions(input: TokenStream) -> TokenStream {
     questions.into_token_stream().into()
 }
 
-#[cfg(feature = "image")]
 #[doc(hidden)]
 #[proc_macro]
 pub fn include_image(input: TokenStream) -> TokenStream {

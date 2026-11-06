@@ -1,5 +1,6 @@
 mod registry;
 
+use crate::PixelBox;
 use crate::json::AlwaysSerialize;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
@@ -7,9 +8,13 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
-#[cfg(feature = "image")]
-use system2_shared::image::ConvertError;
 use system2_shared::image::{Header, HeaderError, read_header};
+#[cfg(feature = "image")]
+use {
+    ::image::{DynamicImage, ImageFormat},
+    std::borrow::Cow,
+    system2_shared::image::{ConvertError, Converted, decode, encode, fitted_size},
+};
 
 pub(crate) use registry::find;
 
@@ -21,22 +26,79 @@ pub struct Image {
     width: u32,
     height: u32,
     bytes: Bytes,
+    place: PixelBox,
+    #[cfg(feature = "image")]
+    original: Original,
 }
 
 impl Image {
     pub fn new(bytes: impl Into<Vec<u8>>) -> Result<Self, InvalidImage> {
         let bytes = bytes.into();
         #[cfg(feature = "image")]
-        let bytes = system2_shared::image::convert(&bytes)?.unwrap_or(bytes);
-        let Header { width, height } = read_header(&bytes)?;
-        let reference = reference_of(&bytes);
-        let shared = registry::register(Shared { reference, bytes })?;
-        let bytes = Bytes::Shared(shared);
+        if let Some(Converted {
+            bytes: converted,
+            original: Header { width, height },
+        }) = system2_shared::image::convert(&bytes)?
+        {
+            let place = whole(width, height);
+            let original = Original::Converted(Arc::new(bytes));
+            return Image::with_original(converted, place, original);
+        }
+        let (Header { width, height }, bytes) = register(bytes)?;
+        let place = whole(width, height);
+        #[cfg(feature = "image")]
+        let original = Original::Encoded(bytes.clone());
         Ok(Image {
             width,
             height,
             bytes,
+            place,
+            #[cfg(feature = "image")]
+            original,
         })
+    }
+
+    #[cfg(feature = "image")]
+    fn with_original(
+        bytes: Vec<u8>,
+        place: PixelBox,
+        original: Original,
+    ) -> Result<Self, InvalidImage> {
+        let (Header { width, height }, bytes) = register(bytes)?;
+        Ok(Image {
+            width,
+            height,
+            bytes,
+            place,
+            original,
+        })
+    }
+
+    #[cfg(feature = "image")]
+    pub fn crop(&self, region: PixelBox) -> Result<Image, InvalidImage> {
+        let (original, format) = self.original.decode()?;
+        let (width, height) = (original.width(), original.height());
+        let PixelBox {
+            left,
+            top,
+            right,
+            bottom,
+        } = region;
+        let inside = right <= width && bottom <= height;
+
+        // a region with no area has no size that fits
+        let (cut_width, cut_height) = (right.saturating_sub(left), bottom.saturating_sub(top));
+        let fits = fitted_size(cut_width, cut_height).is_some();
+        if !(inside && fits) {
+            return Err(InvalidImage::Region {
+                region,
+                width,
+                height,
+            });
+        }
+        let cut = original.crop_imm(left, top, cut_width, cut_height);
+        let bytes = encode(&cut, format)?;
+        Image::with_original(bytes, region, self.original.clone())
     }
 
     #[must_use]
@@ -47,6 +109,10 @@ impl Image {
     #[must_use]
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    pub(crate) fn place(&self) -> PixelBox {
+        self.place
     }
 
     // a constant cannot hash its file, so a file of `image!` joins the registry when it is written
@@ -103,6 +169,60 @@ pub enum InvalidImage {
     #[cfg(feature = "image")]
     #[error("the image must be a valid PNG, JPEG, WebP, or GIF")]
     Decode(#[from] ::image::ImageError),
+    #[cfg(feature = "image")]
+    #[error(
+        "the region must be in the original of {width}x{height} px, have an area, and have a long \
+         side at most 5.6 times its short side, not ({}, {}) to ({}, {})",
+        region.left,
+        region.top,
+        region.right,
+        region.bottom
+    )]
+    Region {
+        region: PixelBox,
+        width: u32,
+        height: u32,
+    },
+}
+
+// reads the image that the model sees, and keeps it in the registry while an `Image` holds it
+fn register(bytes: Vec<u8>) -> Result<(Header, Bytes), InvalidImage> {
+    let header = read_header(&bytes)?;
+    let reference = reference_of(&bytes);
+    let shared = registry::register(Shared { reference, bytes })?;
+    Ok((header, Bytes::Shared(shared)))
+}
+
+const fn whole(width: u32, height: u32) -> PixelBox {
+    PixelBox {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: height,
+    }
+}
+
+// the image that the caller gave, with all of its pixels, which a crop cuts from
+#[cfg(feature = "image")]
+#[derive(Clone)]
+enum Original {
+    // the image as it is sent, or the file of `image!`
+    Encoded(Bytes),
+    Converted(Arc<Vec<u8>>),
+    Decoded(Arc<DynamicImage>),
+}
+
+#[cfg(feature = "image")]
+impl Original {
+    fn decode(&self) -> Result<(Cow<'_, DynamicImage>, Option<ImageFormat>), InvalidImage> {
+        let bytes = match self {
+            Original::Encoded(bytes) => bytes.as_slice(),
+            Original::Converted(bytes) => bytes,
+            Original::Decoded(image) => return Ok((Cow::Borrowed(image), None)),
+        };
+        let (image, format) = decode(bytes)?;
+        Ok((Cow::Owned(image), format))
+    }
 }
 
 // the bytes of a file from `image!`, or of an image from run time
@@ -199,15 +319,43 @@ pub const fn image_error(bytes: &[u8]) -> Option<&'static str> {
 #[doc(hidden)]
 #[must_use]
 pub const fn static_image(bytes: &'static [u8]) -> Image {
+    let Header { width, height } = static_header(bytes);
+    Image {
+        width,
+        height,
+        bytes: Bytes::Static(bytes),
+        place: whole(width, height),
+        #[cfg(feature = "image")]
+        original: Original::Encoded(Bytes::Static(bytes)),
+    }
+}
+
+// a file of `image!` that the feature converted, with the file as its original
+#[cfg(feature = "image")]
+#[doc(hidden)]
+#[must_use]
+pub const fn converted_image(
+    converted: &'static [u8],
+    file: &'static [u8],
+    width: u32,
+    height: u32,
+) -> Image {
+    let Header {
+        width: converted_width,
+        height: converted_height,
+    } = static_header(converted);
+    Image {
+        width: converted_width,
+        height: converted_height,
+        bytes: Bytes::Static(converted),
+        place: whole(width, height),
+        original: Original::Encoded(Bytes::Static(file)),
+    }
+}
+
+const fn static_header(bytes: &[u8]) -> Header {
     match read_header(bytes) {
-        Ok(Header { width, height }) => {
-            let bytes = Bytes::Static(bytes);
-            Image {
-                width,
-                height,
-                bytes,
-            }
-        }
+        Ok(header) => header,
         Err(error) => panic!("{}", error.message()),
     }
 }
@@ -215,7 +363,7 @@ pub const fn static_image(bytes: &'static [u8]) -> Image {
 #[macro_export]
 macro_rules! image {
     ($path:literal) => {
-        $crate::image!($crate::__private::include_image!($path))
+        $crate::__private::include_image!($path)
     };
 
     // the length of an array is a constant, so `cargo check` validates the image
@@ -260,8 +408,10 @@ impl TryFrom<::image::DynamicImage> for Image {
     type Error = InvalidImage;
 
     fn try_from(dynamic_image: ::image::DynamicImage) -> Result<Self, Self::Error> {
-        let bytes = system2_shared::image::encode(&dynamic_image, None)?;
-        Image::new(bytes)
+        let bytes = encode(&dynamic_image, None)?;
+        let place = whole(dynamic_image.width(), dynamic_image.height());
+        let original = Original::Decoded(Arc::new(dynamic_image));
+        Image::with_original(bytes, place, original)
     }
 }
 
@@ -280,7 +430,14 @@ impl fmt::Display for Image {
     }
 }
 
-// the bytes can have megabytes, so it shows only their number
+// the bytes can have megabytes, so it shows only their number, and not the original
+#[cfg_attr(
+    feature = "image",
+    expect(
+        clippy::missing_fields_in_debug,
+        reason = "the original can have megabytes too"
+    )
+)]
 impl fmt::Debug for Image {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -288,6 +445,7 @@ impl fmt::Debug for Image {
             .field("width", &self.width)
             .field("height", &self.height)
             .field("bytes", &self.bytes.as_slice().len())
+            .field("place", &self.place)
             .finish()
     }
 }
@@ -304,6 +462,12 @@ impl AlwaysSerialize for Image {}
 mod tests {
     use super::{HeaderError, Image, InvalidImage, image_error, references, static_image};
     use std::collections::BTreeSet;
+    #[cfg(feature = "image")]
+    use {
+        super::{Bytes, Original, converted_image, whole},
+        ::image::{DynamicImage, ImageFormat},
+        std::io::Cursor,
+    };
 
     #[test]
     fn references_finds_references_in_text_values_only() {
@@ -372,5 +536,42 @@ mod tests {
     #[should_panic(expected = "the image must be PNG or JPEG")]
     fn static_image_panics_on_an_invalid_image() {
         let _ = static_image(b"GIF89a");
+    }
+
+    #[cfg(feature = "image")]
+    #[test]
+    fn converted_image_keeps_the_file_as_the_original() {
+        let red = include_bytes!("../tests/images/red.png");
+
+        let image = converted_image(red, b"the file", 200, 100);
+
+        assert_eq!((image.width(), image.height()), (280, 280));
+        assert_eq!(image.place(), whole(200, 100));
+        assert!(matches!(
+            image.original,
+            Original::Encoded(Bytes::Static(b"the file"))
+        ));
+    }
+
+    #[cfg(feature = "image")]
+    #[test]
+    fn crop_keeps_a_jpeg_and_makes_a_png_of_each_other_format() {
+        let original = DynamicImage::new_rgb8(400, 300);
+        let jpeg_start: &[u8] = &[0xFF, 0xD8];
+        let png_start: &[u8] = b"\x89PNG\r\n\x1a\n";
+        let cases = [
+            (ImageFormat::Jpeg, jpeg_start),
+            (ImageFormat::Png, png_start),
+            (ImageFormat::WebP, png_start),
+        ];
+        for (format, start) in cases {
+            let mut bytes = Cursor::new(Vec::new());
+            original.write_to(&mut bytes, format).unwrap();
+            let image = Image::new(bytes.into_inner()).unwrap();
+
+            let crop = image.crop(whole(300, 300)).unwrap();
+
+            assert!(crop.bytes.as_slice().starts_with(start), "{format:?}");
+        }
     }
 }

@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::env;
 use system2::prelude::*;
-use system2::{AskError, Choice, Client, Image, Score};
+use system2::{AskError, Choice, Client, Image, PixelBox, Score};
 
 const RECORDING: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/live.jsonl");
 
@@ -154,16 +154,54 @@ async fn ask_sends_an_image_in_place_of_its_reference() -> system2::Result<()> {
 // a black square from 320 to 440 px across and from 120 to 240 px down, on white
 const SQUARE: Image = image!("images/square.png");
 
+// a patch of the image, as the model sees it
+const PATCH: u32 = 28;
+
+fn assert_near_the_square(pixels: PixelBox, tolerance: u32) {
+    let edges = [pixels.left, pixels.top, pixels.right, pixels.bottom];
+    for (edge, expected) in edges.into_iter().zip([320, 120, 440, 240]) {
+        assert!(edge.abs_diff(expected) <= tolerance, "{pixels:?}");
+    }
+}
+
 #[tokio::test]
 async fn ask_answers_a_bbox_with_the_edges_of_the_region() -> system2::Result<()> {
     let square = replay()?.ask(bbox!("The black square."), &SQUARE).await?;
 
-    // within one patch of 28 px, as the model sees the image
-    let pixels = square.to_pixels(SQUARE.width(), SQUARE.height());
-    let edges = [pixels.left, pixels.top, pixels.right, pixels.bottom];
-    for (edge, expected) in edges.into_iter().zip([320, 120, 440, 240]) {
-        assert!(edge.abs_diff(expected) <= 28, "{pixels:?}");
-    }
+    assert_near_the_square(square.to_pixels(&SQUARE), PATCH);
+    Ok(())
+}
+
+#[tokio::test]
+async fn ask_answers_a_bbox_in_the_image_with_the_region() -> system2::Result<()> {
+    let state = json!({ "first": RED, "second": SQUARE });
+
+    let square = replay()?.ask(bbox!("The black square."), &state).await?;
+
+    // a second image makes the box less precise
+    assert_near_the_square(square.to_pixels(&SQUARE), 2 * PATCH);
+    Ok(())
+}
+
+#[tokio::test]
+async fn ask_answers_a_bbox_on_an_image_in_the_instructions() -> system2::Result<()> {
+    let bbox = bbox!({ "find": "The black square.", "image": SQUARE });
+
+    let square = replay()?
+        .ask(bbox, "Find the shape in the image of the question.")
+        .await?;
+
+    assert_near_the_square(square.to_pixels(&SQUARE), PATCH);
+    Ok(())
+}
+
+#[tokio::test]
+async fn ask_answers_a_bbox_with_no_image_at_a_low_confidence() -> system2::Result<()> {
+    let state = "A kitchen table with a blue mug next to a laptop.";
+
+    let mug = replay()?.ask(bbox!("The mug."), state).await?;
+
+    assert!(mug.confidence() < 0.2, "{}", mug.confidence());
     Ok(())
 }
 

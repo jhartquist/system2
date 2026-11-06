@@ -3,5 +3,5 @@ mod convert;
 mod header;
 
 #[cfg(feature = "image")]
-pub use convert::{ConvertError, convert, encode};
+pub use convert::{ConvertError, Converted, convert, decode, encode, fitted_size};
 pub use header::{Header, HeaderError, read_header};

@@ -98,7 +98,8 @@ fn image_displays_and_serializes_as_its_reference() {
 fn image_debug_shows_the_size_and_not_the_bytes() {
     assert_eq!(
         format!("{RED:?}"),
-        "Image { width: 280, height: 280, bytes: 861 }"
+        "Image { width: 280, height: 280, bytes: 861, \
+         place: PixelBox { left: 0, top: 0, right: 280, bottom: 280 } }"
     );
 }
 
@@ -142,6 +143,23 @@ async fn ask_sends_each_image_in_a_part() {
         "the parts are in the order of their references"
     );
     assert_eq!(parts[2], (image_part(&logo_reference), png(500, 500)));
+}
+
+#[tokio::test]
+async fn ask_sends_an_image_in_a_placeholder_of_the_instructions() {
+    let server = mock_api(noul_response(0.9)).await;
+    let photo = Image::new(png(503, 503)).unwrap();
+
+    client_for(&server)
+        .ask(noul!("Is there a mug in {photo}?"), "A kitchen.")
+        .await
+        .unwrap();
+
+    let (_, parts) = multipart(&only_request(&server).await);
+    let json: Value = serde_json::from_slice(&parts[0].1).unwrap();
+    let instructions = format!("Is there a mug in {photo}?");
+    assert_eq!(json["questions"]["q0"]["instructions"], instructions);
+    assert_eq!(parts[1].1, png(503, 503));
 }
 
 #[tokio::test]

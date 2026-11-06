@@ -1,24 +1,16 @@
 mod support;
 
-use serde_json::{Value, json};
+use serde_json::json;
 use support::{
-    STATE, answer_set_response, client_for, mock_api, noul_answer, only_request, question_texts,
-    request_body, response,
+    STATE, answer_set_response, bbox_answer, client_for, mock_api, noul_answer, only_request, png,
+    question_texts, request_body, response,
 };
 use system2::prelude::*;
-use system2::{AskError, Bbox};
+use system2::{AskError, Bbox, Image, PixelBox};
 use wiremock::ResponseTemplate;
 
 const MUG: Bbox = bbox!("The mug.");
 const MUG_ON_THE_DESK: &str = "The mug on the desk.";
-
-fn bbox_answer(left: f64, top: f64, right: f64, bottom: f64, confidence: f64) -> Value {
-    json!({
-        "type": "box",
-        "box": { "top": top, "bottom": bottom, "left": left, "right": right },
-        "confidence": confidence,
-    })
-}
 
 #[tokio::test]
 async fn bbox_sends_each_form_as_written() {
@@ -125,4 +117,20 @@ async fn ask_refuses_a_box_with_its_edges_out_of_order() {
         error.to_string(),
         "the response must give a left edge at most its right edge, not 0.7 and 0.6"
     );
+}
+
+#[tokio::test]
+async fn to_pixels_gives_the_pixels_of_the_image() {
+    let server = mock_api(response(&bbox_answer(0.25, 0.1, 0.75, 0.5, 0.9))).await;
+    let photo = Image::new(png(400, 300)).unwrap();
+
+    let found = client_for(&server).ask(MUG, &photo).await.unwrap();
+
+    let pixels = PixelBox {
+        left: 100,
+        top: 30,
+        right: 300,
+        bottom: 150,
+    };
+    assert_eq!(found.to_pixels(&photo), pixels);
 }

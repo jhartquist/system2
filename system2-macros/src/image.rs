@@ -1,37 +1,60 @@
-use proc_macro2::{Literal, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
-use std::fs;
 use syn::LitStr;
+#[cfg(feature = "image")]
+use {
+    proc_macro2::Literal,
+    std::fs,
+    system2_shared::image::{Converted, Header},
+};
 
 // reads the file as `include_bytes!` does, from the folder of the file of the call
+#[cfg(feature = "image")]
 pub(crate) fn include_image(path: &LitStr) -> TokenStream {
     let file = path.span().unwrap().local_file();
     let bytes = file.and_then(|file| fs::read(file.with_file_name(path.value())).ok());
     expansion(path, bytes.as_deref())
 }
 
-// rust-analyzer gives no file, and a file that cannot be read gets the error of `include_bytes!`
+// with no feature, the file must pass as it is
+#[cfg(not(feature = "image"))]
+pub(crate) fn include_image(path: &LitStr) -> TokenStream {
+    file_image(path)
+}
+
+// `image!` of the bytes validates the file when the crate builds
+fn file_image(path: &LitStr) -> TokenStream {
+    quote!(::system2::image!(::core::include_bytes!(#path)))
+}
+
+// rust-analyzer gives no file, and a file that cannot be read gets the error of `include_bytes!`.
+// a converted image keeps the file as its original
+#[cfg(feature = "image")]
 fn expansion(path: &LitStr, bytes: Option<&[u8]>) -> TokenStream {
-    let original = quote!(::core::include_bytes!(#path));
     let Some(bytes) = bytes else {
-        return original;
+        return file_image(path);
     };
     match system2_shared::image::convert(bytes) {
-        Ok(None) => original,
-
-        // the original stays in the expansion, so that cargo builds again when the file changes
-        Ok(Some(converted)) => {
-            let converted = Literal::byte_string(&converted);
-            quote!({
-                const _: &[u8] = #original;
-                #converted
-            })
+        Ok(None) => file_image(path),
+        Ok(Some(Converted {
+            bytes,
+            original: Header { width, height },
+        })) => {
+            let converted = Literal::byte_string(&bytes);
+            quote! {
+                ::system2::__private::converted_image(
+                    #converted,
+                    ::core::include_bytes!(#path),
+                    #width,
+                    #height,
+                )
+            }
         }
         Err(error) => syn::Error::new(path.span(), error).into_compile_error(),
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "image"))]
 mod tests {
     use super::expansion;
     use quote::quote;
@@ -48,16 +71,19 @@ mod tests {
     #[test]
     fn expansion_converts_only_an_image_that_needs_it() {
         let path: LitStr = parse_quote!("logo.gif");
-        let original = quote!(::core::include_bytes!("logo.gif")).to_string();
+        let file_image = quote!(::system2::image!(::core::include_bytes!("logo.gif"))).to_string();
 
         let unread = expansion(&path, None).to_string();
         let passed = expansion(&path, Some(PNG)).to_string();
         let converted = expansion(&path, Some(GIF)).to_string();
         let refused = expansion(&path, Some(b"not an image")).to_string();
 
-        assert_eq!(unread, original);
-        assert_eq!(passed, original);
-        assert!(converted.starts_with(&format!("{{ const _ : & [u8] = {original} ; b\"\\x89PNG")));
+        assert_eq!(unread, file_image);
+        assert_eq!(passed, file_image);
+        assert!(converted.starts_with(":: system2 :: __private :: converted_image (b\"\\x89PNG"));
+        assert!(
+            converted.ends_with(", :: core :: include_bytes ! (\"logo.gif\") , 1u32 , 1u32 ,)")
+        );
         assert!(refused.contains("the image must be a valid PNG, JPEG, WebP, or GIF"));
     }
 }

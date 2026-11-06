@@ -1,6 +1,6 @@
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
 use crate::json::Json;
-use crate::{InvalidJson, QuestionSet, Tagged, json};
+use crate::{Image, InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -85,11 +85,18 @@ impl BboxAnswer {
     }
 
     #[must_use]
-    pub fn to_pixels(&self, width: u32, height: u32) -> PixelBox {
-        let left = to_pixel(self.left, width);
-        let top = to_pixel(self.top, height);
-        let right = to_pixel(self.right, width);
-        let bottom = to_pixel(self.bottom, height);
+    pub fn to_pixels(&self, image: &Image) -> PixelBox {
+        self.pixels_in(image.place())
+    }
+
+    // the place of the image in its original, so that a box on a crop maps onto the original
+    fn pixels_in(&self, place: PixelBox) -> PixelBox {
+        let width = place.right - place.left;
+        let height = place.bottom - place.top;
+        let left = place.left + to_pixel(self.left, width);
+        let top = place.top + to_pixel(self.top, height);
+        let right = place.left + to_pixel(self.right, width);
+        let bottom = place.top + to_pixel(self.bottom, height);
         PixelBox {
             left,
             top,
@@ -213,6 +220,15 @@ mod tests {
         })
     }
 
+    fn pixel_box(left: u32, top: u32, right: u32, bottom: u32) -> PixelBox {
+        PixelBox {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
     fn serialized(mut bbox: Bbox) -> String {
         let mut raw_question_set = RawQuestionSet::default();
         bbox.write(&mut raw_question_set);
@@ -331,43 +347,33 @@ mod tests {
     }
 
     #[test]
-    fn to_pixels_rounds_each_edge_to_the_nearest_pixel() {
+    fn pixels_in_rounds_each_edge_and_moves_it_into_the_place() {
         let cases = [
             (
                 bbox_answer(0.21, 0.29, 0.61, 0.69, 0.9),
-                (10, 10),
-                PixelBox {
-                    left: 2,
-                    top: 3,
-                    right: 6,
-                    bottom: 7,
-                },
+                pixel_box(0, 0, 10, 10),
+                pixel_box(2, 3, 6, 7),
             ),
             // 0.29 * 100 is 28.999999999999996, and 0.07 * 100 is 7.000000000000001
             (
                 bbox_answer(0.07, 0.29, 0.29, 0.57, 0.9),
-                (100, 100),
-                PixelBox {
-                    left: 7,
-                    top: 29,
-                    right: 29,
-                    bottom: 57,
-                },
+                pixel_box(0, 0, 100, 100),
+                pixel_box(7, 29, 29, 57),
             ),
             (
                 bbox_answer(0.0, 0.0, 1.0, 1.0, 0.9),
-                (1568, 280),
-                PixelBox {
-                    left: 0,
-                    top: 0,
-                    right: 1568,
-                    bottom: 280,
-                },
+                pixel_box(0, 0, 1568, 280),
+                pixel_box(0, 0, 1568, 280),
+            ),
+            (
+                bbox_answer(0.25, 0.1, 0.75, 0.5, 0.9),
+                pixel_box(1000, 200, 1400, 600),
+                pixel_box(1100, 240, 1300, 400),
             ),
         ];
-        for (answer, (width, height), pixels) in cases {
+        for (answer, place, pixels) in cases {
             assert_eq!(
-                read(answer.clone()).unwrap().to_pixels(width, height),
+                read(answer.clone()).unwrap().pixels_in(place),
                 pixels,
                 "{answer}"
             );

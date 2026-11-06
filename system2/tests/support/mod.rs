@@ -63,13 +63,14 @@ pub(crate) async fn mount(server: &MockServer, response: impl Respond + 'static)
         .await;
 }
 
-// answers each question by its type: a noul at 0.95, a choice with the first option by name, and
-// a score with the highest level, each certain so that its probabilities agree
+// answers each question by its type: a noul at 0.95, a choice with the first option by name, a
+// score with the highest level, each certain so that its probabilities agree, and a bbox around
+// the middle
 pub(crate) struct AnswerByType;
 
 impl Respond for AnswerByType {
     fn respond(&self, request: &Request) -> ResponseTemplate {
-        let questions = &request_body(request)["questions"];
+        let questions = &request_json(request)["questions"];
         let answers: Vec<Value> = (0..questions.as_object().unwrap().len())
             .map(|index| answer_by_type(&questions[format!("q{index}")]))
             .collect();
@@ -103,6 +104,7 @@ fn answer_by_type(question: &Value) -> Value {
                 "probabilities": certain(positions),
             })
         }
+        "box" => bbox_answer(0.25, 0.25, 0.75, 0.75, 0.9),
         other => panic!("unknown question type {other}"),
     }
 }
@@ -142,6 +144,14 @@ pub(crate) fn answer_set_body(answers: &[&Value]) -> Value {
 
 pub(crate) fn noul_answer(probability: f64) -> Value {
     json!({ "type": "noul", "noul": probability })
+}
+
+pub(crate) fn bbox_answer(left: f64, top: f64, right: f64, bottom: f64, confidence: f64) -> Value {
+    json!({
+        "type": "box",
+        "box": { "top": top, "bottom": bottom, "left": left, "right": right },
+        "confidence": confidence,
+    })
 }
 
 pub(crate) fn noul(instructions: &str) -> Noul {
@@ -210,6 +220,19 @@ pub(crate) async fn only_request(server: &MockServer) -> Request {
 
 pub(crate) fn request_body(request: &Request) -> Value {
     serde_json::from_str(&request_text(request)).unwrap()
+}
+
+// the json of a request, also from the part that a request with images sends it in
+pub(crate) fn request_json(request: &Request) -> Value {
+    if request.headers["content-type"] == "application/json" {
+        return request_body(request);
+    }
+    let (_, parts) = multipart(request);
+    let (_, json) = parts
+        .into_iter()
+        .find(|(headers, _)| headers.contains("name=\"request\""))
+        .unwrap();
+    serde_json::from_slice(&json).unwrap()
 }
 
 pub(crate) fn request_text(request: &Request) -> String {

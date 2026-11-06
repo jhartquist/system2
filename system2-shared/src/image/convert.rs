@@ -1,4 +1,4 @@
-use super::header::{MAX_SIDE, MIN_SIDE, fits, read_header};
+use super::header::{Header, MAX_SIDE, MIN_SIDE, fits, read_header};
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
@@ -15,11 +15,29 @@ pub enum ConvertError {
     Size { width: u32, height: u32 },
 }
 
+// the image that the model sees, and the size of the upright original
+#[derive(Debug)]
+pub struct Converted {
+    pub bytes: Vec<u8>,
+    pub original: Header,
+}
+
 // none when the image passes as it is, so that it keeps its bytes
-pub fn convert(bytes: &[u8]) -> Result<Option<Vec<u8>>, ConvertError> {
+pub fn convert(bytes: &[u8]) -> Result<Option<Converted>, ConvertError> {
     if read_header(bytes).is_ok() {
         return Ok(None);
     }
+    let (image, format) = decode(bytes)?;
+    let original = Header {
+        width: image.width(),
+        height: image.height(),
+    };
+    let bytes = encode(&image, format)?;
+    Ok(Some(Converted { bytes, original }))
+}
+
+// the pixels upright by the exif orientation, because the api ignores it
+pub fn decode(bytes: &[u8]) -> Result<(DynamicImage, Option<ImageFormat>), ImageError> {
     let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(ImageError::IoError)?;
@@ -28,7 +46,7 @@ pub fn convert(bytes: &[u8]) -> Result<Option<Vec<u8>>, ConvertError> {
     let orientation = decoder.orientation()?;
     let mut image = DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
-    encode(&image, format).map(Some)
+    Ok((image, format))
 }
 
 // a jpeg stays a jpeg, and each other format becomes a png, so that text stays sharp. each
@@ -56,7 +74,8 @@ pub fn encode(image: &DynamicImage, format: Option<ImageFormat>) -> Result<Vec<u
 }
 
 // one factor for both sides keeps the aspect ratio. none when no factor fits both sides
-fn fitted_size(width: u32, height: u32) -> Option<(u32, u32)> {
+#[must_use]
+pub fn fitted_size(width: u32, height: u32) -> Option<(u32, u32)> {
     let (long, short) = (width.max(height), width.min(height));
     let (fitted_long, fitted_short) = if long > MAX_SIDE {
         (MAX_SIDE, scaled(short, MAX_SIDE, long)?)
@@ -106,7 +125,7 @@ impl fmt::Display for ConvertError {
 #[cfg(test)]
 mod tests {
     use super::super::{Header, read_header};
-    use super::{ConvertError, convert, encode, fitted_size};
+    use super::{ConvertError, Converted, convert, encode, fitted_size};
     use image::{DynamicImage, ImageFormat};
     use std::io::Cursor;
 
@@ -125,7 +144,7 @@ mod tests {
 
     #[test]
     fn convert_keeps_a_jpeg_and_makes_a_png_of_each_other_format() {
-        let small = DynamicImage::new_rgb8(140, 140);
+        let small = DynamicImage::new_rgb8(140, 100);
         let jpeg_start: &[u8] = &[0xFF, 0xD8];
         let png_start: &[u8] = b"\x89PNG\r\n\x1a\n";
         let cases = [
@@ -135,15 +154,22 @@ mod tests {
             (ImageFormat::Gif, png_start),
         ];
         for (format, start) in cases {
-            let converted = convert(&encoded(&small, format)).unwrap().unwrap();
+            let Converted { bytes, original } = convert(&encoded(&small, format)).unwrap().unwrap();
 
-            assert!(converted.starts_with(start), "{format:?}");
+            assert!(bytes.starts_with(start), "{format:?}");
             assert_eq!(
-                read_header(&converted),
+                read_header(&bytes),
                 Ok(Header {
-                    width: 280,
+                    width: 392,
                     height: 280
                 })
+            );
+            assert_eq!(
+                original,
+                Header {
+                    width: 140,
+                    height: 100
+                }
             );
         }
     }

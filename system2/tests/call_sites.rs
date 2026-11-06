@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use support::{AnswerByType, client_for, mount};
 use system2::prelude::*;
 use system2::{Choice, Client, Noul, NoulAnswer, QuestionError, Score, Tagged, Usage};
+#[cfg(feature = "image")]
+use system2::{Image, PixelBox};
 use tokio::task::JoinSet;
 use wiremock::MockServer;
 
@@ -24,6 +26,15 @@ async fn ask_runs_each_call_site_as_written() -> system2::Result<()> {
     questions_the_compiler_checks(CODE).await?;
     choice(CODE).await?;
     score(CODE).await?;
+    #[cfg(feature = "image")]
+    images_and_bbox(
+        support::encoded(
+            &image::DynamicImage::new_rgb8(2000, 1000),
+            image::ImageFormat::Png,
+        ),
+        image::DynamicImage::new_rgb8(400, 300),
+    )
+    .await?;
     questions_from_data(CODE).await?;
     sets(CODE).await?;
     sets_with_names(CODE).await?;
@@ -149,6 +160,61 @@ enum Severity {
     Major,
     /// Data is lost or corrupted.
     Critical,
+}
+
+// `assets/logo.png` and the icon of a build script are files of the test
+#[cfg(feature = "image")]
+const LOGO: Image = image!("images/square.png");
+#[cfg(feature = "image")]
+const ICON: Image = image!(include_bytes!("images/red.png"));
+
+#[cfg(feature = "image")]
+async fn images_and_bbox(
+    bytes: Vec<u8>,
+    dynamic_image: image::DynamicImage,
+) -> system2::Result<()> {
+    let photo = Image::new(bytes)?;
+
+    let drawn = Image::try_from(dynamic_image)?;
+    let pixels = image::DynamicImage::try_from(&photo)?;
+
+    let state = json!({ "photo": photo, "task": "Find the mug." });
+    let same = noul!({ "question": "Is this the same logo?", "logo": LOGO })
+        .ask(&state)
+        .await?;
+    let mug_in_the_photo = noul!("Is there a mug in {photo}?")
+        .ask("A kitchen.")
+        .await?;
+
+    let found = bbox!("The mug.").ask(&photo).await?;
+    let edges = (found.left(), found.top(), found.right(), found.bottom());
+    let sure = found.confidence() > 0.8;
+    let pixels_of_the_photo = (pixels.width(), pixels.height());
+    let pixels = found.to_pixels(&photo);
+    let PixelBox { left, top, .. } = pixels;
+
+    let mug = photo.crop(pixels)?;
+    let handle = bbox!("The handle of the mug.").ask(&mug).await?;
+    let pixels = handle.to_pixels(&mug);
+
+    assert_eq!((ICON.width(), drawn.width()), (280, 400));
+    assert_eq!(pixels_of_the_photo, (1568, 784));
+    assert_eq!(same.probability(), 0.95);
+    assert_eq!(mug_in_the_photo.probability(), 0.95);
+    assert_eq!(edges, (0.25, 0.25, 0.75, 0.75));
+    assert!(sure);
+    assert_eq!((left, top), (500, 250));
+    assert_eq!((mug.width(), mug.height()), (1000, 500));
+    assert_eq!(
+        pixels,
+        PixelBox {
+            left: 750,
+            top: 375,
+            right: 1250,
+            bottom: 625
+        }
+    );
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Levels)]

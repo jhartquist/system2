@@ -41,15 +41,14 @@ pub mod __private {
     };
     pub use crate::ask::questions::{SealedAnswers, question_set};
     pub use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
+    #[cfg(feature = "image")]
+    pub use crate::image::converted_image;
     pub use crate::image::{image_error, static_image};
     pub use crate::json::{AlwaysSerialize, Json, is_blank, to_json, unescaped};
     pub use crate::question::bbox::bbox;
     pub use crate::question::choice::{choice, owned_choice};
     pub use crate::question::noul::noul;
     pub use crate::question::score::score;
-    #[cfg(not(feature = "image"))]
-    pub use core::include_bytes as include_image;
     pub use serde;
-    #[cfg(feature = "image")]
     pub use system2_macros::include_image;
 }
