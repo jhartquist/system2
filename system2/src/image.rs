@@ -420,7 +420,14 @@ impl TryFrom<&Image> for ::image::DynamicImage {
     type Error = InvalidImage;
 
     fn try_from(image: &Image) -> Result<Self, Self::Error> {
-        Ok(::image::load_from_memory(image.bytes.as_slice())?)
+        let (original, _) = image.original.decode()?;
+        let PixelBox {
+            left,
+            top,
+            right,
+            bottom,
+        } = image.place;
+        Ok(original.crop_imm(left, top, right - left, bottom - top))
     }
 }
 

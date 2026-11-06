@@ -126,11 +126,11 @@ async fn to_pixels_gives_the_pixels_of_the_image() {
 
     let found = client_for(&server).ask(MUG, &photo).await.unwrap();
 
-    let pixels = PixelBox {
+    let pixel_box = PixelBox {
         left: 100,
         top: 30,
         right: 300,
         bottom: 150,
     };
-    assert_eq!(found.to_pixels(&photo), pixels);
+    assert_eq!(found.to_pixels(&photo), pixel_box);
 }

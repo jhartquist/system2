@@ -324,6 +324,19 @@ pub(crate) fn encoded(image: &image::DynamicImage, format: image::ImageFormat) -
     bytes.into_inner()
 }
 
+// the pixels of the image that the model sees
+#[cfg(feature = "image")]
+pub(crate) async fn sent_pixels(image: &system2::Image) -> image::DynamicImage {
+    let server = mock_api(noul_response(0.9)).await;
+    client_for(&server)
+        .ask(noul("Is it a photo?"), image)
+        .await
+        .unwrap();
+
+    let (_, parts) = multipart(&only_request(&server).await);
+    image::load_from_memory(&parts[1].1).unwrap()
+}
+
 // the start of a jpeg that `Image::new` reads: its start and its frame header
 pub(crate) fn jpeg(width: u16, height: u16) -> Vec<u8> {
     let mut frame = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 8];

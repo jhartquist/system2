@@ -3,7 +3,7 @@
 mod support;
 
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
-use support::{bbox_answer, client_for, encoded, mock_api, png, response};
+use support::{bbox_answer, client_for, encoded, mock_api, png, response, sent_pixels};
 use system2::prelude::*;
 use system2::{AskError, Bbox, BboxAnswer, Image, InvalidImage, PixelBox};
 
@@ -89,18 +89,41 @@ fn image_converts_a_file_when_the_crate_builds() {
     assert_eq!(SMALL.to_string(), from_data.to_string());
 }
 
-#[test]
-fn try_from_converts_to_and_from_a_dynamic_image() {
+#[tokio::test]
+async fn try_from_converts_a_dynamic_image_into_an_image() {
     let checks = RgbImage::from_fn(300, 300, |x, y| Rgb([255 * u8::from((x + y) % 2 == 0); 3]));
     let checks = DynamicImage::from(checks);
 
     let drawn = Image::try_from(checks.clone()).unwrap();
     let scaled = Image::try_from(DynamicImage::new_rgb8(2000, 1000)).unwrap();
-    let pixels = DynamicImage::try_from(&drawn).unwrap();
 
     // a png keeps each pixel, and a jpeg would not
-    assert_eq!(pixels, checks);
+    assert_eq!(sent_pixels(&drawn).await, checks);
     assert_eq!((scaled.width(), scaled.height()), (1568, 784));
+}
+
+#[test]
+fn try_from_gives_the_place_of_the_image_in_its_original() {
+    let large = photo(2000, 1000);
+    let passes = photo(600, 400);
+    let converted = Image::new(encoded(&large, ImageFormat::Png)).unwrap();
+    let cases = [
+        (Image::try_from(large.clone()).unwrap(), large.clone()),
+        (converted.clone(), large.clone()),
+        (
+            converted.crop(pixel_box(1000, 200, 1200, 300)).unwrap(),
+            large.crop_imm(1000, 200, 200, 100),
+        ),
+        (
+            Image::new(encoded(&passes, ImageFormat::Png)).unwrap(),
+            passes,
+        ),
+    ];
+    for (image, place) in cases {
+        let pixels = DynamicImage::try_from(&image).unwrap();
+
+        assert!(pixels == place, "{image:?}");
+    }
 }
 
 #[test]
@@ -149,15 +172,15 @@ async fn to_pixels_gives_the_pixels_of_the_original() {
             pixel_box(1100, 240, 1300, 400),
         ),
     ];
-    for (image, pixels) in cases {
+    for (image, pixel_box) in cases {
         let found = find_mug(&image, 0.25, 0.1, 0.75, 0.5).await.unwrap();
 
-        assert_eq!(found.to_pixels(&image), pixels, "{image:?}");
+        assert_eq!(found.to_pixels(&image), pixel_box, "{image:?}");
     }
 }
 
-#[test]
-fn crop_cuts_the_region_from_each_original_with_all_of_its_detail() {
+#[tokio::test]
+async fn crop_cuts_the_region_from_each_original_with_all_of_its_detail() {
     let large = photo(2000, 1000);
     let passes = photo(600, 400);
     let converted = Image::new(encoded(&large, ImageFormat::Png)).unwrap();
@@ -187,7 +210,7 @@ fn crop_cuts_the_region_from_each_original_with_all_of_its_detail() {
         let crop = image.crop(region).unwrap();
 
         let cut = original.crop_imm(left, top, right - left, bottom - top);
-        assert_eq!(DynamicImage::try_from(&crop).unwrap(), cut, "{region:?}");
+        assert_eq!(sent_pixels(&crop).await, cut, "{region:?}");
     }
 }
 

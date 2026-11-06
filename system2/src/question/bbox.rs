@@ -371,10 +371,10 @@ mod tests {
                 pixel_box(1100, 240, 1300, 400),
             ),
         ];
-        for (answer, place, pixels) in cases {
+        for (answer, place, pixel_box) in cases {
             assert_eq!(
                 read(answer.clone()).unwrap().pixels_in(place),
-                pixels,
+                pixel_box,
                 "{answer}"
             );
         }

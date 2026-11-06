@@ -157,10 +157,15 @@ const SQUARE: Image = image!("images/square.png");
 // a patch of the image, as the model sees it
 const PATCH: u32 = 28;
 
-fn assert_near_the_square(pixels: PixelBox, tolerance: u32) {
-    let edges = [pixels.left, pixels.top, pixels.right, pixels.bottom];
+fn assert_near_the_square(pixel_box: PixelBox, tolerance: u32) {
+    let edges = [
+        pixel_box.left,
+        pixel_box.top,
+        pixel_box.right,
+        pixel_box.bottom,
+    ];
     for (edge, expected) in edges.into_iter().zip([320, 120, 440, 240]) {
-        assert!(edge.abs_diff(expected) <= tolerance, "{pixels:?}");
+        assert!(edge.abs_diff(expected) <= tolerance, "{pixel_box:?}");
     }
 }
 

@@ -190,15 +190,15 @@ async fn images_and_bbox(
     let edges = (found.left(), found.top(), found.right(), found.bottom());
     let sure = found.confidence() > 0.8;
     let pixels_of_the_photo = (pixels.width(), pixels.height());
-    let pixels = found.to_pixels(&photo);
-    let PixelBox { left, top, .. } = pixels;
+    let pixel_box = found.to_pixels(&photo);
+    let PixelBox { left, top, .. } = pixel_box;
 
-    let mug = photo.crop(pixels)?;
+    let mug = photo.crop(pixel_box)?;
     let handle = bbox!("The handle of the mug.").ask(&mug).await?;
-    let pixels = handle.to_pixels(&mug);
+    let pixel_box = handle.to_pixels(&mug);
 
     assert_eq!((ICON.width(), drawn.width()), (280, 400));
-    assert_eq!(pixels_of_the_photo, (1568, 784));
+    assert_eq!(pixels_of_the_photo, (2000, 1000));
     assert_eq!(same.probability(), 0.95);
     assert_eq!(mug_in_the_photo.probability(), 0.95);
     assert_eq!(edges, (0.25, 0.25, 0.75, 0.75));
@@ -206,7 +206,7 @@ async fn images_and_bbox(
     assert_eq!((left, top), (500, 250));
     assert_eq!((mug.width(), mug.height()), (1000, 500));
     assert_eq!(
-        pixels,
+        pixel_box,
         PixelBox {
             left: 750,
             top: 375,
