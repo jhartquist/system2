@@ -63,6 +63,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Replay quick_start from its recording
+        env:
+          SYSTEM2_CACHE: examples/quick_start/responses.jsonl
+        run: cargo run -p quick_start
       - name: Replay find_in_image from its recording
         env:
           SYSTEM2_CACHE: examples/find_in_image/responses.jsonl

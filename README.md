@@ -66,6 +66,7 @@ async fn main() -> system2::Result<()> {
 - [ ] docs
   - [ ] rustdoc
   - [ ] examples
+    - [x] `quick_start`
     - [x] `find_in_image`
   - [ ] cookbook ports
     - [x] `citation_check`
