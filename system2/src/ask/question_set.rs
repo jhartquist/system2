@@ -13,7 +13,9 @@ use std::array;
 )]
 pub trait QuestionSet: Sized + Sealed {
     type AnswerSet;
+}
 
+pub trait Ask: QuestionSet {
     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Self> {
         match Client::global() {
             Ok(client) => client.ask(self, state),
@@ -30,12 +32,14 @@ pub trait QuestionSet: Sized + Sealed {
     }
 }
 
+impl<Q: QuestionSet> Ask for Q {}
+
 pub trait AskIterator: Iterator + Sized {
     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Vec<Self::Item>>
     where
         Self::Item: QuestionSet,
     {
-        QuestionSet::ask(self.collect::<Vec<_>>(), state)
+        Ask::ask(self.collect::<Vec<_>>(), state)
     }
 
     fn ask_with_receipt<S: Serialize + ?Sized>(
@@ -45,7 +49,7 @@ pub trait AskIterator: Iterator + Sized {
     where
         Self::Item: QuestionSet,
     {
-        QuestionSet::ask_with_receipt(self.collect::<Vec<_>>(), state)
+        Ask::ask_with_receipt(self.collect::<Vec<_>>(), state)
     }
 }
 

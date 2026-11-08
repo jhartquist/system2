@@ -5,6 +5,7 @@
 #![cfg_attr(not(test), deny(clippy::float_cmp))]
 
 mod ask;
+pub mod blocking;
 mod client;
 mod error;
 mod image;
@@ -12,7 +13,7 @@ mod json;
 mod question;
 
 pub use ask::{
-    Answers, AskError, AskFuture, AskIterator, AskWithReceiptFuture, QuestionSet, Questions,
+    Answers, Ask, AskError, AskFuture, AskIterator, AskWithReceiptFuture, QuestionSet, Questions,
     Receipt, Tagged, Usage,
 };
 pub use client::{CacheError, Client, Compression, EnvError};
@@ -29,8 +30,8 @@ pub use system2_macros::{Answers, Levels, Options, bbox, choice, noul, questions
 pub mod prelude {
     #[doc(no_inline)]
     pub use crate::{
-        Answers, AskIterator, Levels, Options, QuestionSet, Questions, bbox, choice, image, noul,
-        questions, score,
+        Answers, Ask, AskIterator, Levels, Options, QuestionSet, Questions, bbox, choice, image,
+        noul, questions, score,
     };
 }
 

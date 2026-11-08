@@ -37,6 +37,15 @@ pub(crate) fn counted_drops() -> usize {
     COUNTED_DROPS.get()
 }
 
+// for a test with no runtime, as in a blocking program, which needs one only for the mock api
+pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+
 pub(crate) async fn mock_api(response: ResponseTemplate) -> MockServer {
     let server = MockServer::start().await;
     mount(&server, response).await;

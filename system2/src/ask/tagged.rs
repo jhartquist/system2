@@ -34,7 +34,7 @@ impl<Q: QuestionSet, T> Sealed for Tagged<Q, T> {
 #[cfg(test)]
 mod tests {
     use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
-    use crate::{Noul, QuestionSet};
+    use crate::{Ask, Noul, QuestionSet};
     use serde_json::json;
 
     fn noul(text: &str) -> Noul {

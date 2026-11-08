@@ -26,7 +26,7 @@ sha2 = "0.11"
 system2-macros = { version = "0.1.0", path = "../system2-macros" }
 system2-shared = { version = "0.1.0", path = "../system2-shared" }
 thiserror = "2"
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "time"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 zstd = "0.14"
 
