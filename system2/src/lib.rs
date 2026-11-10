@@ -39,7 +39,7 @@ pub mod __private {
     pub use crate::ask::field::{
         DataKind, IteratorKind, Probe, QuestionSetKind, ReferenceKind, ResultKind, field,
     };
-    pub use crate::ask::questions::{SealedAnswers, question_set};
+    pub use crate::ask::questions::{SealedAnswers, answers, question_set};
     pub use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     #[cfg(feature = "image")]
     pub use crate::image::converted_image;

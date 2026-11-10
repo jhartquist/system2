@@ -25,11 +25,43 @@ pub trait Answers: SealedAnswers {}
             or use `questions! {{ … }}` for other question sets"
 )]
 pub trait SealedAnswers: Sized {
-    type AnswerSet;
+    fn question_set() -> impl QuestionSet<AnswerSet = Self>;
+}
 
-    fn question_set() -> impl QuestionSet<AnswerSet = Self::AnswerSet>;
+// the question set of a derive, with the struct of its fields as the answers. the derive names
+// no type of the set in its impl, so a public struct can hold the answer of a private type
+#[doc(hidden)]
+pub fn answers<Q: QuestionSet, A>(
+    question_set: Q,
+    from_answer_set: fn(Q::AnswerSet) -> A,
+) -> impl QuestionSet<AnswerSet = A> {
+    Named {
+        question_set,
+        from_answer_set,
+    }
+}
 
-    fn from_answer_set(answer_set: Self::AnswerSet) -> Self;
+struct Named<Q: QuestionSet, A> {
+    question_set: Q,
+    from_answer_set: fn(Q::AnswerSet) -> A,
+}
+
+impl<Q: QuestionSet, A> QuestionSet for Named<Q, A> {
+    type AnswerSet = A;
+}
+
+impl<Q: QuestionSet, A> Sealed for Named<Q, A> {
+    fn write(&mut self, raw_question_set: &mut RawQuestionSet) {
+        self.question_set.write(raw_question_set);
+    }
+
+    fn read(
+        self,
+        raw_answer_set: &mut RawAnswerSet,
+    ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
+        let answer_set = self.question_set.read(raw_answer_set)?;
+        Ok((self.from_answer_set)(answer_set))
+    }
 }
 
 // ties a question of the derive to the answer of its field, so a wrong question is an error at
@@ -64,8 +96,7 @@ impl<A: Answers> Sealed for Questions<A> {
         self,
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
-        let answer_set = A::question_set().read(raw_answer_set)?;
-        Ok(A::from_answer_set(answer_set))
+        A::question_set().read(raw_answer_set)
     }
 }
 
@@ -109,14 +140,11 @@ mod tests {
     impl Answers for Review {}
 
     impl SealedAnswers for Review {
-        type AnswerSet = (NoulAnswer, Option<NoulAnswer>);
-
-        fn question_set() -> impl QuestionSet<AnswerSet = Self::AnswerSet> {
-            (noul("Is it buggy?"), Some(noul("Is it tested?")))
-        }
-
-        fn from_answer_set((buggy, tested): Self::AnswerSet) -> Self {
-            Review { buggy, tested }
+        fn question_set() -> impl QuestionSet<AnswerSet = Self> {
+            super::answers(
+                (noul("Is it buggy?"), Some(noul("Is it tested?"))),
+                |(buggy, tested)| Review { buggy, tested },
+            )
         }
     }
 

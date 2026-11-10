@@ -37,7 +37,6 @@ pub(crate) fn answers(input: &DeriveInput) -> syn::Result<TokenStream> {
     }
 
     let mut names = Vec::new();
-    let mut answer_types = Vec::new();
     let mut question_sets = Vec::new();
     for field in &fields.named {
         #[expect(
@@ -53,10 +52,8 @@ pub(crate) fn answers(input: &DeriveInput) -> syn::Result<TokenStream> {
             ::system2::__private::question_set::<#answer_type, _>(const { #question })
         });
         names.push(name);
-        answer_types.push(quote!(#answer_type));
     }
 
-    let answer_set_type = nested_tuple(&answer_types);
     let question_set = nested_tuple(&question_sets);
 
     // a binding matches a constant of the same name, so a prefix makes that unlikely
@@ -67,16 +64,10 @@ pub(crate) fn answers(input: &DeriveInput) -> syn::Result<TokenStream> {
         impl ::system2::Answers for #ident {}
 
         impl ::system2::__private::SealedAnswers for #ident {
-            type AnswerSet = #answer_set_type;
-
-            fn question_set() -> impl ::system2::QuestionSet<AnswerSet = Self::AnswerSet> {
-                #question_set
-            }
-
-            fn from_answer_set(#answer_set: Self::AnswerSet) -> Self {
-                Self {
+            fn question_set() -> impl ::system2::QuestionSet<AnswerSet = Self> {
+                ::system2::__private::answers(#question_set, |#answer_set| Self {
                     #(#names: #answer_set #paths,)*
-                }
+                })
             }
         }
     })
@@ -170,20 +161,19 @@ mod tests {
             impl ::system2::Answers for Review {}
 
             impl #private::SealedAnswers for Review {
-                type AnswerSet = (NoulAnswer, NoulAnswer,);
-
-                fn question_set() -> impl ::system2::QuestionSet<AnswerSet = Self::AnswerSet> {
-                    (
-                        #private::question_set::<NoulAnswer, _>(const { BUGGY }),
-                        #private::question_set::<NoulAnswer, _>(const { noul!("Is it tested?") }),
+                fn question_set() -> impl ::system2::QuestionSet<AnswerSet = Self> {
+                    #private::answers(
+                        (
+                            #private::question_set::<NoulAnswer, _>(const { BUGGY }),
+                            #private::question_set::<NoulAnswer, _>(const {
+                                noul!("Is it tested?")
+                            }),
+                        ),
+                        |__answer_set| Self {
+                            buggy: __answer_set.0,
+                            r#tested: __answer_set.1,
+                        }
                     )
-                }
-
-                fn from_answer_set(__answer_set: Self::AnswerSet) -> Self {
-                    Self {
-                        buggy: __answer_set.0,
-                        r#tested: __answer_set.1,
-                    }
                 }
             }
         };

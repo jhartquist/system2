@@ -233,6 +233,25 @@ fn problem_answer() -> Value {
     })
 }
 
+// a public set can hold the answer of a private type, as each struct can
+#[derive(Answers)]
+pub struct Verdict {
+    #[system2(question = PROBLEM)]
+    problem: ChoiceAnswer<Problem>,
+}
+
+#[tokio::test]
+async fn ask_takes_a_public_named_set_with_a_private_answer_type() {
+    let server = mock_api(answer_set_response(&[&problem_answer()])).await;
+
+    let verdict: Verdict = client_for(&server)
+        .ask(Questions::new(), STATE)
+        .await
+        .unwrap();
+
+    assert_eq!(verdict.problem.most_likely(), &Problem::Style);
+}
+
 fn severity_answer() -> Value {
     json!({
         "type": "score",

@@ -25,3 +25,4 @@ note: required by a bound in `system2::__private::question_set`
   |
   | pub fn question_set<A, Q: QuestionSet<AnswerSet = A>>(
   |                                       ^^^^^^^^^^^^^ required by this bound in `question_set`
+  = note: this error originates in the derive macro `Answers` (in Nightly builds, run with -Z macro-backtrace for more info)
