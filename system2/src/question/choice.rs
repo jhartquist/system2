@@ -8,6 +8,7 @@ use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
+use std::iter;
 use system2_shared::choice::{self, MAX_OPTIONS};
 
 #[derive(Debug, Clone)]
@@ -305,9 +306,13 @@ impl<O> ChoiceAnswer<O> {
     pub fn top(&self, n: usize) -> impl Iterator<Item = (&O, f64)> {
         let mut ranked: Vec<_> = self.probabilities().collect();
 
+        // the api chooses from the exact probabilities, so its choice goes first, also over a
+        // rounded tie
+        let most_likely = ranked.remove(self.choice);
+
         // a stable sort keeps equal options in the order of the question
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
-        ranked.into_iter().take(n)
+        iter::once(most_likely).chain(ranked).take(n)
     }
 
     #[must_use]
@@ -743,14 +748,24 @@ mod tests {
     }
 
     #[test]
-    fn top_ranks_by_probability_then_by_order() {
-        let answer = languages();
+    fn top_gives_the_most_likely_option_then_ranks_by_probability_and_order() {
+        let probabilities = json!({ "rust": 0.2, "python": 0.4, "go": 0.4 });
+        let cases = [
+            ("go", ["go", "python", "rust"]),
+            ("python", ["python", "go", "rust"]),
+            ("rust", ["rust", "python", "go"]),
+        ];
+        for (most_likely, ranked) in cases {
+            let choice = Choice::new("Which language?", ["rust", "python", "go"]).unwrap();
+            let answer = read(choice, answer(most_likely, &probabilities)).unwrap();
 
-        let top: Vec<_> = answer.top(2).collect();
-        let all: Vec<_> = answer.top(5).collect();
+            let top: Vec<_> = answer.top(2).map(|(name, _)| *name).collect();
+            let all: Vec<_> = answer.top(5).map(|(name, _)| *name).collect();
 
-        assert_eq!(top, [(&"python", 0.4), (&"go", 0.4)]);
-        assert_eq!(all, [(&"python", 0.4), (&"go", 0.4), (&"rust", 0.2)]);
+            assert_eq!(top, ranked[..2], "{most_likely}");
+            assert_eq!(all, ranked, "{most_likely}");
+        }
+        assert_eq!(languages().top(1).next(), Some((&"go", 0.4)));
     }
 
     #[test]
