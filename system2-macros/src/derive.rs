@@ -1,6 +1,7 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use std::collections::{HashMap, HashSet};
+use syn::ext::IdentExt;
 use syn::{Attribute, Data, DeriveInput, Expr, ExprLit, Fields, Ident, Lit, Meta, Variant};
 use system2_shared::{choice, score};
 
@@ -285,7 +286,7 @@ fn entry<'a>(variant: &'a Variant, derive: &Derive) -> syn::Result<Entry<'a>> {
 // as serde writes `rename_all = "snake_case"`, so the two derives agree
 fn snake_case(ident: &Ident) -> String {
     let mut name = String::new();
-    for (i, c) in ident.to_string().char_indices() {
+    for (i, c) in ident.unraw().to_string().char_indices() {
         if i > 0 && c.is_uppercase() {
             name.push('_');
         }
@@ -312,7 +313,18 @@ fn doc_comment(attrs: &[Attribute]) -> syn::Result<Option<String>> {
         };
 
         // not `lines()`, which gives no line for an empty `///`
-        lines.extend(text.value().split('\n').map(|line| line.trim().to_owned()));
+        let text = text.value();
+        let mut doc_lines: Vec<_> = text.split('\n').map(str::trim).collect();
+
+        // a block comment can start each line after the first with a star, and rustdoc shows
+        // none of these stars
+        let has_stars = |line: &&str| line.is_empty() || line.starts_with('*');
+        if doc_lines.iter().skip(1).all(has_stars) {
+            for line in doc_lines.iter_mut().skip(1) {
+                *line = line.strip_prefix('*').unwrap_or(line).trim_start();
+            }
+        }
+        lines.extend(doc_lines.into_iter().map(str::to_owned));
     }
 
     // an empty line ends a paragraph
@@ -331,7 +343,7 @@ fn doc_comment(attrs: &[Attribute]) -> syn::Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::{doc_comment, levels, options, snake_case};
-    use proc_macro2::{Span, TokenStream};
+    use proc_macro2::TokenStream;
     use quote::{format_ident, quote};
     use syn::{DeriveInput, Ident, Variant, parse_quote};
 
@@ -346,20 +358,22 @@ mod tests {
 
     #[test]
     fn snake_case_writes_names_as_serde_does() {
-        let cases = [
-            ("Crash", "crash"),
-            ("WrongResult", "wrong_result"),
-            ("HTTPError", "h_t_t_p_error"),
-            ("Level2A", "level2_a"),
+        let cases: [(Ident, &str); 6] = [
+            (parse_quote!(Crash), "crash"),
+            (parse_quote!(WrongResult), "wrong_result"),
+            (parse_quote!(HTTPError), "h_t_t_p_error"),
+            (parse_quote!(Level2A), "level2_a"),
+            (parse_quote!(r#type), "type"),
+            (parse_quote!(r#fn), "fn"),
         ];
         for (variant, name) in cases {
-            assert_eq!(snake_case(&Ident::new(variant, Span::call_site())), name);
+            assert_eq!(snake_case(&variant), name);
         }
     }
 
     #[test]
     fn doc_comment_joins_the_lines_as_rustdoc_shows_them() {
-        let cases: [(Variant, Option<&str>); 6] = [
+        let cases: [(Variant, Option<&str>); 10] = [
             (parse_quote!(Crash), None),
             (
                 parse_quote! {
@@ -402,6 +416,41 @@ mod tests {
                     Crash
                 },
                 Some("The code panics for some input."),
+            ),
+            (
+                parse_quote! {
+                    /** The code panics
+                     * for some input. */
+                    Crash
+                },
+                Some("The code panics for some input."),
+            ),
+            (
+                parse_quote! {
+                    /**
+                     * The code panics.
+                     *
+                     * It does not return.
+                     */
+                    Crash
+                },
+                Some("The code panics.\n\nIt does not return."),
+            ),
+            (
+                parse_quote! {
+                    /** The code panics for:
+                     * each empty input
+                    and each long input. */
+                    Crash
+                },
+                Some("The code panics for: * each empty input and each long input."),
+            ),
+            (
+                parse_quote! {
+                    /// * The code panics.
+                    Crash
+                },
+                Some("* The code panics."),
             ),
         ];
         for (variant, text) in cases {
