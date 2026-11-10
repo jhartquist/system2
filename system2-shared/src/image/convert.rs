@@ -2,7 +2,7 @@ use super::header::{Header, MAX_SIDE, MIN_SIDE, fits, read_header};
 use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
-use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader};
+use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits};
 use std::fmt;
 use std::io::Cursor;
 
@@ -43,6 +43,10 @@ pub fn decode(bytes: &[u8]) -> Result<(DynamicImage, Option<ImageFormat>), Image
         .map_err(ImageError::IoError)?;
     let format = reader.format();
     let mut decoder = reader.into_decoder()?;
+
+    // the header of a small file can give a very large size, and `from_decoder` allocates
+    // the full image with no memory limit. so check the limit before the decode
+    Limits::default().reserve(decoder.total_bytes())?;
     let orientation = decoder.orientation()?;
     let mut image = DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
@@ -126,7 +130,7 @@ impl fmt::Display for ConvertError {
 mod tests {
     use super::super::{Header, read_header};
     use super::{ConvertError, Converted, convert, encode, fitted_size};
-    use image::{DynamicImage, ImageFormat};
+    use image::{DynamicImage, ImageError, ImageFormat};
     use std::io::Cursor;
 
     fn encoded(image: &DynamicImage, format: ImageFormat) -> Vec<u8> {
@@ -183,6 +187,23 @@ mod tests {
                 "{bytes:?}"
             );
         }
+    }
+
+    #[test]
+    fn convert_refuses_an_image_that_needs_too_much_memory() {
+        // a gif of 16000x16000 px, which is 1 GiB of pixels: the header, the size of the screen,
+        // and the start of one frame of that size
+        let side = 16000_u16.to_le_bytes();
+        let screen = [&side[..], &side, &[0, 0, 0]].concat();
+        let frame = [&b",\0\0\0\0"[..], &side, &side, &[0, 2, 0, b';']].concat();
+        let gif = [&b"GIF89a"[..], &screen, &frame].concat();
+
+        let error = convert(&gif).unwrap_err();
+
+        assert!(
+            matches!(error, ConvertError::Decode(ImageError::Limits(_))),
+            "{error:?}"
+        );
     }
 
     #[test]
