@@ -69,12 +69,12 @@ impl Cache {
         let (file, writable) = match open {
             Ok(file) => (file, true),
 
-            // a file that the client can only read still gives its responses
-            Err(error) if error.kind() == ErrorKind::PermissionDenied => {
+            // a file that the client can only read still gives its responses, for each reason
+            // that it cannot write, such as a read-only file system
+            Err(error) => {
                 let file = File::open(&path).map_err(|_| read_error(error))?;
                 (file, false)
             }
-            Err(error) => return Err(read_error(error)),
         };
 
         // the first line of a request wins, as it does in `write`
