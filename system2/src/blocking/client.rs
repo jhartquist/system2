@@ -2,12 +2,26 @@ use crate::{AskError, QuestionSet, Receipt, Usage};
 use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
-use tokio::runtime::{self, Runtime};
+use tokio::runtime::{self, Handle, Runtime};
 
 #[derive(Clone)]
 pub struct Client {
     client: crate::Client,
-    runtime: Arc<Runtime>,
+    runtime: Arc<OwnedRuntime>,
+}
+
+// a runtime panics on a drop in async code, but not on a shutdown in the background
+struct OwnedRuntime {
+    handle: Handle,
+    runtime: Option<Runtime>,
+}
+
+impl Drop for OwnedRuntime {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl Client {
@@ -16,7 +30,9 @@ impl Client {
         question_set: Q,
         state: &S,
     ) -> Result<Q::AnswerSet, AskError> {
-        self.runtime.block_on(self.client.ask(question_set, state))
+        self.runtime
+            .handle
+            .block_on(self.client.ask(question_set, state))
     }
 
     pub fn ask_with_receipt<Q: QuestionSet, S: Serialize + ?Sized>(
@@ -25,6 +41,7 @@ impl Client {
         state: &S,
     ) -> Result<(Q::AnswerSet, Receipt), AskError> {
         self.runtime
+            .handle
             .block_on(self.client.ask_with_receipt(question_set, state))
     }
 
@@ -36,7 +53,12 @@ impl Client {
 
 impl From<crate::Client> for Client {
     fn from(client: crate::Client) -> Self {
-        let runtime = Arc::new(runtime());
+        let runtime = runtime();
+        let handle = runtime.handle().clone();
+        let runtime = Arc::new(OwnedRuntime {
+            handle,
+            runtime: Some(runtime),
+        });
         Client { client, runtime }
     }
 }

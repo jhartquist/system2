@@ -131,7 +131,16 @@ async fn ask_panics_in_an_async_runtime() {
 }
 
 #[tokio::test]
-#[should_panic(expected = "Cannot drop a runtime in a context where blocking is not allowed")]
-async fn drop_panics_in_an_async_runtime() {
-    drop(blocking::Client::from(Client::new()));
+async fn drop_stops_the_runtime_in_an_async_runtime() {
+    let server = mock_api(noul_response(0.92)).await;
+    let client = blocking::Client::from(client_for(&server));
+    let worker = client.clone();
+
+    let answer = tokio::task::spawn_blocking(move || worker.ask(noul(INSTRUCTIONS), STATE))
+        .await
+        .unwrap()
+        .unwrap();
+    drop(client);
+
+    assert_eq!(answer.probability(), 0.92);
 }
