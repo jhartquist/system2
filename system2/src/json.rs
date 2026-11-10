@@ -60,6 +60,7 @@ impl AlwaysSerialize for char {}
 impl AlwaysSerialize for bool {}
 impl AlwaysSerialize for () {}
 impl AlwaysSerialize for serde_json::Value {}
+impl AlwaysSerialize for serde_json::Map<String, serde_json::Value> {}
 impl<T: AlwaysSerialize + ?Sized> AlwaysSerialize for &T {}
 impl<T: AlwaysSerialize + ?Sized> AlwaysSerialize for Box<T> {}
 impl<T: AlwaysSerialize + ToOwned + ?Sized> AlwaysSerialize for Cow<'_, T> {}
@@ -193,8 +194,8 @@ mod tests {
     use super::{Json, is_blank, to_json, unescaped, validate, validate_optional};
     use crate::InvalidJson;
     use serde::Serialize;
-    use serde_json::json;
     use serde_json::value::RawValue;
+    use serde_json::{Map, json};
     use std::borrow::Cow;
     use std::collections::BTreeMap;
 
@@ -251,10 +252,11 @@ mod tests {
             BTreeMap::from([("d", 1)]),
             (),
             [1.5],
+            Map::from_iter([(String::from("e"), json!(true))]),
         );
         assert_eq!(
             to_json(&value),
-            r#"[["a",null],"b","c",{"d":1},null,[1.5]]"#
+            r#"[["a",null],"b","c",{"d":1},null,[1.5],{"e":true}]"#
         );
     }
 

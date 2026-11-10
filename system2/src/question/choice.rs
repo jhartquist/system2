@@ -58,6 +58,7 @@ mod label {
     use crate::InvalidJson;
     use serde::Serialize;
     use serde_json::value::RawValue;
+    use std::borrow::Cow;
     use std::fmt::Display;
 
     pub trait Name: Display {}
@@ -90,6 +91,7 @@ mod label {
 
     impl Name for str {}
     impl Name for String {}
+    impl Name for Cow<'_, str> {}
     impl<N: Name + ?Sized> Name for &N {}
 
     macro_rules! integers {
@@ -429,6 +431,7 @@ mod tests {
     use crate::InvalidJson;
     use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed};
     use serde_json::{Map, Value, json};
+    use std::borrow::Cow;
     use std::collections::BTreeMap;
 
     fn serialized<O>(mut choice: Choice<O>) -> String {
@@ -548,6 +551,7 @@ mod tests {
 
         let by_id = Choice::with_values("Which skill?", &skills, |s| s.id).unwrap();
         let by_name = Choice::with_values("Which skill?", &skills, |s| &s.name).unwrap();
+        let by_cow = Choice::with_values("Which skill?", &skills, |s| Cow::from(&s.name)).unwrap();
         let described = Choice::with_values("Which skill?", &skills, |s| {
             (s.name.as_str(), s.description)
         })
@@ -562,6 +566,7 @@ mod tests {
         };
         assert_eq!(criteria(by_id), r#"{"7":null,"3":null}}"#);
         assert_eq!(criteria(by_name), r#"{"search":null,"edit":null}}"#);
+        assert_eq!(criteria(by_cow), r#"{"search":null,"edit":null}}"#);
         assert_eq!(
             criteria(described),
             r#"{"search":"Find a file.","edit":null}}"#
