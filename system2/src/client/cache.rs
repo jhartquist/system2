@@ -112,6 +112,12 @@ impl Cache {
         self.lock().responses.get(request_sha256).cloned()
     }
 
+    // a new response cannot go into a file that the client can only read, so the request fails
+    // before it spends tokens. an empty text writes nothing
+    pub(crate) fn check_writable(&self) -> Result<(), CacheError> {
+        self.lock().append(&self.path, "")
+    }
+
     pub(crate) fn path(&self) -> &Path {
         &self.path
     }

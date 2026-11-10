@@ -340,6 +340,7 @@ async fn cache_answers_from_a_file_that_it_can_only_read() {
         "permission denied"
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), line);
+    assert_eq!(request_count(&server).await, 0);
 }
 
 #[test]

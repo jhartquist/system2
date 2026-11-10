@@ -308,6 +308,9 @@ impl Client {
         if self.offline {
             return Err(AskError::Offline);
         }
+        if let Some(cache) = &self.cache {
+            cache.check_writable().map_err(AskError::Cache)?;
+        }
 
         let (text, request_id, latency) =
             self.post(body, request_sha256, &images, has_bbox).await?;
