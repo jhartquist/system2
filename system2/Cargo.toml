@@ -6,8 +6,12 @@ rust-version = "1.88"
 description = "System 2 decisions from System 1 judgments."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jhartquist/system2"
+readme = "../README.md"
 keywords = ["jev", "typesafe", "llm", "decision"]
 categories = ["api-bindings", "asynchronous"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lints]
 workspace = true
@@ -23,8 +27,8 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.11"
-system2-macros = { version = "0.1.0", path = "../system2-macros" }
-system2-shared = { version = "0.1.0", path = "../system2-shared" }
+system2-macros = { version = "=0.1.0", path = "../system2-macros" }
+system2-shared = { version = "=0.1.0", path = "../system2-shared" }
 thiserror = "2"
 tokio = { version = "1", features = ["net", "rt-multi-thread", "sync", "time"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
