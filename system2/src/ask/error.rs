@@ -43,7 +43,7 @@ pub enum AskError {
     BboxModel { model: String },
     #[error("the response must arrive within the timeout: raise it with `Client::timeout`")]
     Timeout,
-    #[error("the connection to the API failed: {0}")]
+    #[error("the connection to the API failed: check the network and the base URL")]
     Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error(
         "the API refused the request with status {status}: {message}{}",

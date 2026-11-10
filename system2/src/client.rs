@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use serde_json::value::RawValue;
 use std::collections::{BTreeSet, HashMap};
+use std::error::Error;
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -391,7 +392,7 @@ impl Client {
                     system2.attempt = attempt,
                     http.response.status_code = status,
                     system2.time_ms = time_ms,
-                    system2.error = %error,
+                    system2.error = &error as &dyn Error,
                     "attempt"
                 );
                 return Err(error);
@@ -400,7 +401,7 @@ impl Client {
                 system2.attempt = attempt,
                 http.response.status_code = status,
                 system2.time_ms = time_ms,
-                system2.error = %error,
+                system2.error = &error as &dyn Error,
                 system2.wait_ms = millis(wait),
                 "retry"
             );

@@ -8,8 +8,9 @@ mod support;
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::fmt;
+use std::error::Error;
 use std::sync::Once;
+use std::{fmt, iter};
 use support::{
     INSTRUCTIONS, STATE, answer_set_response, cache_path, client_for, mock_api, mock_api_then,
     multipart, noul, noul_answer, noul_response, only_request, partial_api, png, request_text,
@@ -53,6 +54,18 @@ impl Visit for Fields {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         self.0.insert(field.name(), format!("{value:?}"));
     }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
+        self.0.insert(field.name(), with_sources(value));
+    }
+}
+
+// an error and each of its sources, as a subscriber writes them
+fn with_sources(error: &(dyn Error + 'static)) -> String {
+    let messages: Vec<_> = iter::successors(Some(error), |&error| error.source())
+        .map(ToString::to_string)
+        .collect();
+    messages.join(": ")
 }
 
 // each test polls its requests on its own thread, so a thread local keeps the tests apart
@@ -259,7 +272,7 @@ async fn ask_traces_the_error_of_the_last_attempt() {
     for (client, status) in cases {
         let error = client.ask(nouls(&[INSTRUCTIONS]), STATE).await.unwrap_err();
 
-        let error = error.to_string();
+        let error = with_sources(&error);
         let [span] = traced_spans().try_into().unwrap();
         let [mut attempt] = span.events.try_into().unwrap();
         assert_eq!(attempt.level, Level::DEBUG, "{error}");

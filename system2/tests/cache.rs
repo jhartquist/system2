@@ -2,6 +2,7 @@ mod support;
 
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::error::Error;
 use std::fs;
 use std::io::ErrorKind;
 use std::time::Duration;
@@ -330,9 +331,13 @@ async fn cache_answers_from_a_file_that_it_can_only_read() {
     assert_eq!(
         online_error.to_string(),
         format!(
-            "the client cannot add to the cache file `{}`: permission denied",
+            "the client cannot add to the cache file `{}`",
             path.display()
         )
+    );
+    assert_eq!(
+        online_error.source().unwrap().to_string(),
+        "permission denied"
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), line);
 }
@@ -382,10 +387,12 @@ fn cache_refuses_a_line_that_is_not_a_hash_and_its_response() {
             error.to_string(),
             format!(
                 "line {line} of the cache file `{}` must be the hash of a request and its \
-                 response: {message}",
+                 response",
                 path.display()
             )
         );
+        let source = error.source().unwrap().to_string();
+        assert!(source.starts_with(message), "{source}");
         assert_eq!(fs::read(&path).unwrap(), text);
     }
 }
@@ -398,23 +405,22 @@ fn cache_refuses_a_file_that_it_cannot_read() {
     let cases = [
         (
             folder.join("missing").join("cache.jsonl"),
-            "; make its folder first",
+            ": make its folder first",
         ),
         (folder.clone(), ""),
     ];
     for (path, fix) in cases {
         let error = Client::new().cache(&path).unwrap_err();
 
-        let CacheError::Read { source, .. } = &error else {
-            panic!("{error:?}");
-        };
+        assert!(matches!(error, CacheError::Read { .. }), "{error:?}");
         assert_eq!(
             error.to_string(),
             format!(
-                "the client cannot read the cache file `{}`: {source}{fix}",
+                "the client cannot read the cache file `{}`{fix}",
                 path.display()
             )
         );
+        assert!(error.source().is_some());
     }
 }
 

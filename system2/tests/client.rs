@@ -193,13 +193,13 @@ async fn ask_reports_a_failed_connection() {
         .unwrap_err();
 
     assert!(matches!(error, AskError::Transport(_)));
-    assert!(error.source().is_some());
     assert_eq!(
         error.to_string(),
-        format!(
-            "the connection to the API failed: \
-             error sending request for url ({closed}/v1/systemone)"
-        )
+        "the connection to the API failed: check the network and the base URL"
+    );
+    assert_eq!(
+        error.source().unwrap().to_string(),
+        format!("error sending request for url ({closed}/v1/systemone)")
     );
 }
 

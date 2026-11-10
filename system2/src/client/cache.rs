@@ -40,18 +40,13 @@ struct Line<R> {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CacheError {
-    #[error(
-        "the client cannot read the cache file `{}`: {source}{}",
-        path.display(),
-        read_fix(source)
-    )]
+    #[error("the client cannot read the cache file `{}`{}", path.display(), read_fix(source))]
     Read { path: PathBuf, source: io::Error },
-    #[error("the client cannot add to the cache file `{}`: {source}", path.display())]
+    #[error("the client cannot add to the cache file `{}`", path.display())]
     Write { path: PathBuf, source: io::Error },
     #[error(
-        "line {line} of the cache file `{}` must be the hash of a request and its response: {}",
-        path.display(),
-        without_position(source)
+        "line {line} of the cache file `{}` must be the hash of a request and its response",
+        path.display()
     )]
     InvalidLine {
         path: PathBuf,
@@ -189,15 +184,8 @@ fn parse_line(bytes: &[u8]) -> Result<([u8; 32], Value), serde_json::Error> {
 // a missing file is made, so only a missing folder is not found
 fn read_fix(source: &io::Error) -> &'static str {
     if source.kind() == ErrorKind::NotFound {
-        "; make its folder first"
+        ": make its folder first"
     } else {
         ""
     }
-}
-
-// the line of the file is the only position, as each line parses alone
-fn without_position(source: &serde_json::Error) -> String {
-    let text = source.to_string();
-    let position = format!(" at line {} column {}", source.line(), source.column());
-    text.strip_suffix(&position).unwrap_or(&text).to_owned()
 }
