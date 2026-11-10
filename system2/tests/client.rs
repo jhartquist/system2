@@ -35,6 +35,10 @@ async fn ask_sends_a_noul_and_reads_its_answer() {
     assert_eq!(header("content-type"), "application/json");
     assert_eq!(header("content-encoding"), "zstd");
     assert_eq!(
+        header("user-agent"),
+        concat!("system2/", env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
         request_body(&request),
         json!({
             "model": "jev-1.14.0",

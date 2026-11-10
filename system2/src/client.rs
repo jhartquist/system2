@@ -71,6 +71,7 @@ impl Client {
         // the api never redirects, and a 301 or 302 turns a post into a get
         let http = reqwest::Client::builder()
             .redirect(Policy::none())
+            .user_agent(concat!("system2/", env!("CARGO_PKG_VERSION")))
             .build()
             .expect("TLS starts");
         Client {
