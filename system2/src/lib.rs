@@ -21,9 +21,8 @@ pub use error::{Error, Result};
 pub use image::{Image, InvalidImage};
 pub use json::InvalidJson;
 pub use question::{
-    Bbox, BboxAnswer, Choice, ChoiceAnswer, ChoiceOption, InvalidBbox, InvalidChoice, InvalidNoul,
-    InvalidScore, Label, Levels, Noul, NoulAnswer, Options, PixelBox, QuestionError, Score,
-    ScoreAnswer, ScoreLevel,
+    Bbox, BboxAnswer, Choice, ChoiceAnswer, InvalidBbox, InvalidChoice, InvalidNoul, InvalidScore,
+    Label, Levels, Noul, NoulAnswer, Options, PixelBox, QuestionError, Score, ScoreAnswer,
 };
 pub use system2_macros::{Answers, Levels, Options, bbox, choice, noul, questions, score};
 
@@ -47,9 +46,9 @@ pub mod __private {
     pub use crate::image::{image_error, static_image};
     pub use crate::json::{AlwaysSerialize, Json, is_blank, to_json, unescaped};
     pub use crate::question::bbox::bbox;
-    pub use crate::question::choice::{choice, owned_choice};
+    pub use crate::question::choice::{ChoiceOption, choice, owned_choice};
     pub use crate::question::noul::noul;
-    pub use crate::question::score::score;
+    pub use crate::question::score::{ScoreLevel, score};
     pub use serde;
     pub use system2_macros::include_image;
 }

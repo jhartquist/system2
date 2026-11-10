@@ -73,7 +73,7 @@ pub(crate) fn options(input: &DeriveInput) -> syn::Result<TokenStream> {
         };
 
         table.push(quote! {
-            ::system2::ChoiceOption {
+            ::system2::__private::ChoiceOption {
                 name: #name,
                 description: #description,
                 value: || Self::#variant
@@ -86,7 +86,7 @@ pub(crate) fn options(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         impl #impl_generics ::system2::Options for #ident #type_generics #where_clause {
-            const OPTIONS: &'static [::system2::ChoiceOption<Self>] = &[#(#table),*];
+            const OPTIONS: &'static [::system2::__private::ChoiceOption<Self>] = &[#(#table),*];
         }
     })
 }
@@ -134,7 +134,9 @@ pub(crate) fn levels(input: &DeriveInput) -> syn::Result<TokenStream> {
             return Err(syn::Error::new(variant.span(), message));
         }
 
-        table.push(quote!(::system2::ScoreLevel { level: #level, value: || Self::#variant }));
+        table.push(quote! {
+            ::system2::__private::ScoreLevel { level: #level, value: || Self::#variant }
+        });
     }
 
     let ident = &input.ident;
@@ -142,7 +144,7 @@ pub(crate) fn levels(input: &DeriveInput) -> syn::Result<TokenStream> {
 
     Ok(quote! {
         impl #impl_generics ::system2::Levels for #ident #type_generics #where_clause {
-            const LEVELS: &'static [::system2::ScoreLevel<Self>] = &[#(#table),*];
+            const LEVELS: &'static [::system2::__private::ScoreLevel<Self>] = &[#(#table),*];
         }
     })
 }
@@ -419,13 +421,13 @@ mod tests {
 
         let table = quote! {
             impl ::system2::Options for Problem {
-                const OPTIONS: &'static [::system2::ChoiceOption<Self>] = &[
-                    ::system2::ChoiceOption {
+                const OPTIONS: &'static [::system2::__private::ChoiceOption<Self>] = &[
+                    ::system2::__private::ChoiceOption {
                         name: "crash",
                         description: ::core::option::Option::Some("The code panics."),
                         value: || Self::Crash
                     },
-                    ::system2::ChoiceOption {
+                    ::system2::__private::ChoiceOption {
                         name: "style",
                         description: ::core::option::Option::None,
                         value: || Self::Style
@@ -449,9 +451,15 @@ mod tests {
 
         let table = quote! {
             impl ::system2::Levels for Severity {
-                const LEVELS: &'static [::system2::ScoreLevel<Self>] = &[
-                    ::system2::ScoreLevel { level: "Nothing breaks.", value: || Self::Minor },
-                    ::system2::ScoreLevel { level: "Data is lost.", value: || Self::Critical }
+                const LEVELS: &'static [::system2::__private::ScoreLevel<Self>] = &[
+                    ::system2::__private::ScoreLevel {
+                        level: "Nothing breaks.",
+                        value: || Self::Minor
+                    },
+                    ::system2::__private::ScoreLevel {
+                        level: "Data is lost.",
+                        value: || Self::Critical
+                    }
                 ];
             }
         };
