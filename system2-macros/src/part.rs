@@ -37,7 +37,7 @@ impl Part {
             return Ok(Part { name, form });
         }
 
-        let form = match input.parse()? {
+        let form = match ungrouped(input.parse()?) {
             Expr::Lit(ExprLit {
                 lit: Lit::Str(literal),
                 ..
@@ -77,6 +77,15 @@ impl Part {
     }
 }
 
+// a fragment of a `macro_rules!` of the caller, such as `$text:literal`, comes in a group with
+// no delimiters
+pub(crate) fn ungrouped(mut expression: Expr) -> Expr {
+    while let Expr::Group(group) = expression {
+        expression = *group.expr;
+    }
+    expression
+}
+
 impl ToTokens for Part {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let json = quote!(::system2::__private::Json);
@@ -101,7 +110,11 @@ impl ToTokens for Part {
                     #json::String(#cow::Borrowed([
                         const { #constant };
                         {
-                            ::core::assert!(!::system2::__private::is_blank(#constant), #message);
+                            ::core::assert!(
+                                !::system2::__private::is_blank(#constant),
+                                "{}",
+                                #message
+                            );
                             1
                         }
                     ][0]))

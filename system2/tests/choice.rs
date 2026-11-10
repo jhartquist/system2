@@ -244,6 +244,12 @@ async fn choice_sends_each_form_as_written() {
             r#"{"type":"choice","instructions":"What next?","criteria":{"block":"Ask for a fix.","approve":{"when":"tests pass"}}}"#,
         ),
         (
+            choice!("Which token?", { "{{": BLOCK_TEXT, "}}": "End the block." }),
+            choice_answer("{", &["{", "}"]),
+            "{",
+            r#"{"type":"choice","instructions":"Which token?","criteria":{"{":"Ask for a fix.","}":"End the block."}}"#,
+        ),
+        (
             choice!("What next?", {
                 "approve": "Use `{library}`.",
                 "block": { "unless": rule },

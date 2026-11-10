@@ -45,6 +45,18 @@ macro_rules! text_from_a_macro {
     };
 }
 
+macro_rules! noul_of {
+    ($instructions:literal) => {
+        noul!($instructions)
+    };
+}
+
+macro_rules! noul_about {
+    ($subject:expr) => {
+        noul!({ "question": "Is it tested?", "subject": $subject })
+    };
+}
+
 #[tokio::test]
 async fn noul_sends_each_form_as_written() {
     let function = "parse";
@@ -144,6 +156,27 @@ async fn noul_sends_each_form_as_written() {
     let (nouls, texts): (Vec<_>, Vec<_>) = cases.into_iter().unzip();
     let answers: Vec<_> = texts.iter().map(|_| noul_answer(0.5)).collect();
     let server = mock_api(answer_set_response(&answers.iter().collect::<Vec<_>>())).await;
+
+    client_for(&server).ask(nouls, STATE).await.unwrap();
+
+    assert_eq!(question_texts(&only_request(&server).await), texts);
+}
+
+#[tokio::test]
+async fn noul_formats_a_literal_from_a_macro_of_the_caller() {
+    let function = "parse";
+    let cases = [
+        (
+            noul_of!("Is `{function}` a {{block}}?"),
+            r#"{"type":"noul","instructions":"Is `parse` a {block}?"}"#,
+        ),
+        (
+            noul_about!("`{function}`, not `{{}}`"),
+            r#"{"type":"noul","instructions":{"question":"Is it tested?","subject":"`parse`, not `{}`"}}"#,
+        ),
+    ];
+    let (nouls, texts): (Vec<_>, Vec<_>) = cases.into_iter().unzip();
+    let server = mock_api(answer_set_response(&[&noul_answer(0.5), &noul_answer(0.5)])).await;
 
     client_for(&server).ask(nouls, STATE).await.unwrap();
 

@@ -1,4 +1,4 @@
-use crate::part::{has_placeholder, unescaped};
+use crate::part::{has_placeholder, unescaped, ungrouped};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use std::collections::HashSet;
@@ -67,7 +67,7 @@ impl Parse for Value {
             input.parse::<Token![-]>()?;
             return literal(&input.parse()?, "-");
         }
-        match input.parse()? {
+        match ungrouped(input.parse()?) {
             Expr::Lit(ExprLit { lit, .. }) => literal(&lit, ""),
             Expr::Path(path) if path.path.is_ident("null") => Ok(Value::Literal("null".to_owned())),
             expression => Ok(Value::Expression(expression)),
