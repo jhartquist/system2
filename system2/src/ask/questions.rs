@@ -3,10 +3,51 @@ use crate::QuestionSet;
 use std::marker::PhantomData;
 use std::{any, fmt};
 
+/// The question set of a named set: the struct `A`, which derives [`Answers`].
+///
+/// The type `A` selects the questions, so `Questions` takes no data. Each question is a constant,
+/// and `cargo check` validates it. `Questions` makes its questions for each request, and again to
+/// read the answers.
+///
+/// # Examples
+///
+/// ```no_run
+/// use system2::prelude::*;
+/// use system2::NoulAnswer;
+///
+/// #[derive(Debug, Answers)]
+/// struct Triage {
+///     #[system2(question = noul!("Is the ticket urgent?"))]
+///     urgent: NoulAnswer,
+///     #[system2(question = noul!("Is the customer angry?"))]
+///     angry: NoulAnswer,
+/// }
+///
+/// // the struct is the caller's, so it can have methods
+/// impl Triage {
+///     fn needs_a_call(&self) -> bool {
+///         self.urgent.is_likely() && self.angry.is_likely()
+///     }
+/// }
+///
+/// const TRIAGE: Questions<Triage> = Questions::new();
+///
+/// # async fn run() -> system2::Result<()> {
+/// let triage = TRIAGE.ask("The site is down again.").await?;
+/// if triage.needs_a_call() { /* … */ }
+/// let triage: Triage = Questions::new().ask("The site is down again.").await?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct Questions<A: Answers> {
     answers: PhantomData<fn() -> A>,
 }
 
+/// The answers of a named set: a struct that holds an answer set in each field.
+///
+/// Only [`derive(Answers)`](macro@crate::Answers) implements it. The derive adds no method to the
+/// struct, so each name is free for the methods of the caller. [`Questions`] asks the questions
+/// of the struct.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not the answers of a named set",
     label = "not the answers of a named set",
@@ -74,6 +115,7 @@ pub fn question_set<A, Q: QuestionSet<AnswerSet = A>>(
 }
 
 impl<A: Answers> Questions<A> {
+    /// Makes the question set of `A`.
     #[must_use]
     pub const fn new() -> Self {
         let answers = PhantomData;

@@ -1,3 +1,5 @@
+//! Tests of `Client::global` with no global client.
+
 mod support;
 
 use std::env;

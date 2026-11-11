@@ -6,6 +6,13 @@ use std::task::{Context, Poll, ready};
 
 type Request = Pin<Box<dyn Future<Output = Result<Response, AskError>> + Send>>;
 
+/// The future of [`Ask::ask`](crate::Ask::ask), which gives the answers.
+///
+/// It owns the question set, and does not borrow the state. It is `Send` when the question set is
+/// `Send`. A drop cancels the request. Then the client sends no more attempts, and adds nothing
+/// to the cache or to the total of tokens.
+///
+/// It needs a Tokio runtime to send a request. An answer from the cache needs no runtime.
 #[must_use = "a request is sent only when its answers are awaited"]
 pub struct AskFuture<Q> {
     // outside the request, so the future is `Send` only when the question set is
@@ -70,6 +77,10 @@ impl<Q: QuestionSet> Future for AskFuture<Q> {
     }
 }
 
+/// The future of [`Ask::ask_with_receipt`](crate::Ask::ask_with_receipt), which gives the
+/// answers and a [`Receipt`].
+///
+/// It behaves as [`AskFuture`] does.
 #[must_use = "a request is sent only when its answers are awaited"]
 pub struct AskWithReceiptFuture<Q> {
     ask_future: AskFuture<Q>,

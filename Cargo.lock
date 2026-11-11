@@ -1675,6 +1675,7 @@ dependencies = [
  "quote",
  "serde_json",
  "syn 2.0.119",
+ "system2",
  "system2-shared",
 ]
 

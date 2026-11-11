@@ -1,3 +1,5 @@
+//! Tests of the global client with the cache of the environment.
+
 mod support;
 
 use std::{env, fs};

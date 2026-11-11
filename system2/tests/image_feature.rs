@@ -1,3 +1,5 @@
+//! Tests of `Image` with the `image` feature.
+
 #![cfg(feature = "image")]
 
 mod support;

@@ -1,3 +1,5 @@
+//! Tests of `tag` and `Tagged`.
+
 mod support;
 
 use serde_json::json;

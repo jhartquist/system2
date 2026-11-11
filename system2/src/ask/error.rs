@@ -5,60 +5,114 @@ use serde_json::Value;
 const TOKEN_LIMIT: &str = "max_tokens_exceeded";
 const BBOX_MODEL_REFUSAL: &str = "Invalid request.";
 
+/// An error of `ask`.
+///
+/// Each message tells the fix, if a fix exists. The message does not hold the cause of the
+/// error. [`source`](std::error::Error::source) gives it.
+///
+/// # Examples
+///
+/// ```no_run
+/// use system2::prelude::*;
+/// use system2::AskError;
+///
+/// # async fn run() {
+/// match noul!("Is the ticket urgent?").ask("The site is down.").await {
+///     Ok(answer) => println!("{:.2}", answer.probability()),
+///     Err(AskError::Offline) => println!("record the response with a run online"),
+///     Err(AskError::Http { status: 429, .. }) => println!("the retries stopped"),
+///     Err(error) => eprintln!("{error}"),
+/// }
+/// # }
+/// ```
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum AskError {
+    /// The state does not serialize, is not text, an object, or an array, or is empty.
     #[error("the state {0}")]
     State(InvalidJson),
+    /// The client must send a request, and it has no API key.
     #[error("a request must have an API key: set `TYPESAFE_API_KEY`, or call `Client::api_key`")]
     MissingApiKey,
+    /// The API key is not a valid HTTP header value.
     #[error(
         "the API key must be a valid HTTP header value: \
          remove line breaks and other control characters"
     )]
     InvalidApiKey,
+    /// The base URL is not an absolute HTTP or HTTPS URL.
     #[error("the base URL must be an absolute HTTP or HTTPS URL, not `{url}`")]
-    InvalidBaseUrl { url: String },
+    InvalidBaseUrl {
+        /// The base URL.
+        url: String,
+    },
+    /// The client is offline, and the cache has no response for the request.
     #[error(
         "the cache has no response for the request, and the client is offline: \
          set `SYSTEM2_CACHE` or call `Client::cache`, and record the response with a run online"
     )]
     Offline,
+    /// The request has more tokens than the API permits. It gets no retry.
     #[error("the request has too many tokens{}", token_limit_fix(*long_context))]
-    TokenLimit { long_context: bool },
+    TokenLimit {
+        /// `true` if the request had the long context, and its higher limits.
+        long_context: bool,
+    },
+    /// The images of the request have more than 32 MiB.
     #[error(
         "the images of the request must have at most 32 MiB, not {size} bytes: \
          split the request, or send smaller images"
     )]
-    ByteLimit { size: usize },
+    ByteLimit {
+        /// The size of the images, in bytes.
+        size: usize,
+    },
+    /// The request refers to an image, and no [`Image`](crate::Image) holds it now.
     #[error(
         "the request refers to the image `{reference}`, and no `Image` holds it now: \
          keep the `Image` until `ask` returns"
     )]
-    MissingImage { reference: String },
+    MissingImage {
+        /// The reference of the image, such as `s2-img-` and 16 hex digits.
+        reference: String,
+    },
+    /// The request has a Bbox, and its model is earlier than `jev-1.14.0`.
     #[error(
         "the model of a Bbox must be `jev-1.14.0` or a later version, not `{model}`: \
          call `Client::model(\"jev-latest\")`"
     )]
-    BboxModel { model: String },
+    BboxModel {
+        /// The model of the request.
+        model: String,
+    },
+    /// An attempt took longer than the timeout, and the retries stopped.
     #[error("the response must arrive within the timeout: raise it with `Client::timeout`")]
     Timeout,
+    /// The connection failed, and the retries stopped. The value is the cause.
     #[error("the connection to the API failed: check the network and the base URL")]
     Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
+    /// The API refused the request with an error status, and the retries stopped.
     #[error(
         "the API refused the request with status {status}: {message}{}",
         format_request_id(request_id.as_deref())
     )]
     Http {
+        /// The HTTP status code.
         status: u16,
+        /// The message of the API, the body, or the reason of the status.
         message: String,
+        /// The ID of the request, for TypeSafe support.
         request_id: Option<String>,
     },
+    /// The response does not have the shape of the API, or does not answer the questions.
     #[error("the response {message}{}", format_request_id(request_id.as_deref()))]
     InvalidResponse {
+        /// What is wrong with the response.
         message: String,
+        /// The ID of the request, for TypeSafe support.
         request_id: Option<String>,
     },
+    /// The client cannot open the cache file, or add to it.
     #[error(transparent)]
     Cache(CacheError),
 }

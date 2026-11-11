@@ -5,6 +5,7 @@ pub(crate) const MIN_SIDE: u32 = 280;
 pub(crate) const MAX_SIDE: u32 = 1568;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 
+/// The first eight bytes of each PNG file.
 pub const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 // the signature, then the length, the type, the 13 bytes of data, and the crc of the header chunk
@@ -18,20 +19,40 @@ const ORIENTATION_TAG: u16 = 0x0112;
 const UPRIGHT: u16 = 1;
 const TIFF_ENTRY: usize = 12;
 
+/// The size of an image, in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Header {
+    /// The width, in pixels.
     pub width: u32,
+    /// The height, in pixels.
     pub height: u32,
 }
 
+/// An image that the API cannot take as it is.
 // `Copy`, so a constant can drop it
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeaderError {
+    /// The image is not PNG or JPEG.
     Format,
+    /// The PNG or JPEG header is not complete.
     Header,
-    Size { width: u32, height: u32 },
-    Bytes { size: usize },
-    Orientation { orientation: u16 },
+    /// A side of the image is less than 280 px or more than 1568 px.
+    Size {
+        /// The width, in pixels.
+        width: u32,
+        /// The height, in pixels.
+        height: u32,
+    },
+    /// The image has more than 16 MiB.
+    Bytes {
+        /// The size of the image, in bytes.
+        size: usize,
+    },
+    /// The EXIF orientation turns or mirrors the image.
+    Orientation {
+        /// The value of the EXIF orientation, from 2 to 8.
+        orientation: u16,
+    },
 }
 
 // with the feature, `image!` converts a file, but it cannot read the value of a constant
@@ -53,6 +74,7 @@ macro_rules! fix {
 }
 
 impl HeaderError {
+    /// Returns the message of the error, without the values of the image.
     // a panic in a constant takes no numbers, so the message of `image!` has none
     #[must_use]
     pub const fn message(self) -> &'static str {
@@ -76,6 +98,13 @@ impl HeaderError {
     }
 }
 
+/// Reads the size of a PNG or JPEG image, and validates the image.
+///
+/// The rules are those of `Image::new` without the `image` feature.
+///
+/// # Errors
+///
+/// Returns the [`HeaderError`] of the first rule that the image breaks.
 pub const fn read_header(bytes: &[u8]) -> Result<Header, HeaderError> {
     if bytes.len() > MAX_BYTES {
         let size = bytes.len();

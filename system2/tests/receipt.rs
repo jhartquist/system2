@@ -1,3 +1,5 @@
+//! Tests of `ask_with_receipt` and `Client::usage`.
+
 mod support;
 
 use serde_json::json;

@@ -1,3 +1,5 @@
+//! Tests of `Score`, `score!`, and `ScoreAnswer` against a mock server.
+
 mod support;
 
 use serde_json::{Value, json};

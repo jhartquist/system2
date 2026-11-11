@@ -1,6 +1,29 @@
 use super::wire::{RawAnswerSet, RawQuestionSet, Sealed};
 use crate::QuestionSet;
 
+/// A question set with a tag, which comes back next to the answers.
+///
+/// [`Ask::tag`](crate::Ask::tag) and the `tag` method of each question type make it. The answers
+/// are `(answers, tag)`. The tag is of any type, owned or borrowed, and it is not sent.
+///
+/// # Examples
+///
+/// ```no_run
+/// use system2::prelude::*;
+/// use system2::{Noul, Tagged};
+///
+/// const CHECKS: [Tagged<Noul, &str>; 2] = [
+///     noul!("Is the ticket urgent?").tag("urgent"),
+///     noul!("Is the customer angry?").tag("angry"),
+/// ];
+///
+/// # async fn run() -> system2::Result<()> {
+/// for (answer, name) in CHECKS.ask("The site is down again.").await? {
+///     println!("{name}: {:.2}", answer.probability());
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Tagged<Q, T> {
     question_set: Q,

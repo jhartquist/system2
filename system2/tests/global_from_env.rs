@@ -1,3 +1,5 @@
+//! Tests of the global client that `.ask` makes from the environment.
+
 mod support;
 
 use std::env;

@@ -3,19 +3,29 @@ use crate::{
     InvalidNoul, InvalidScore, QuestionError,
 };
 
+/// Each error of the crate.
+///
+/// Each error type converts into it, so `?` works in a function that returns [`Result`].
+/// [`InvalidJson`](crate::InvalidJson) is only a part of another error, so it does not convert.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// A constructor refused a question.
     #[error(transparent)]
     Question(#[from] QuestionError),
+    /// An answer that a test built breaks a rule of its question.
     #[error(transparent)]
     Answer(#[from] InvalidAnswer),
+    /// An image breaks a rule of [`Image`](crate::Image).
     #[error(transparent)]
     Image(#[from] InvalidImage),
+    /// A request failed.
     #[error(transparent)]
     Ask(#[from] AskError),
+    /// The client cannot read or write the cache file.
     #[error(transparent)]
     Cache(#[from] CacheError),
+    /// A variable of the environment has a bad value.
     #[error(transparent)]
     Env(#[from] EnvError),
 }
@@ -44,4 +54,5 @@ impl From<InvalidBbox> for Error {
     }
 }
 
+/// A `Result` with [`Error`] as its default error.
 pub type Result<T, E = Error> = std::result::Result<T, E>;

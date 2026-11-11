@@ -5,6 +5,7 @@ use serde_json::Value;
 use serde_json::value::{RawValue, to_raw_value};
 use std::collections::HashMap;
 
+#[doc(hidden)]
 pub trait Sealed {
     // `&mut`, so a question keeps the values that it makes to send, for its answer
     fn write(&mut self, raw_question_set: &mut RawQuestionSet);
@@ -18,6 +19,7 @@ pub trait Sealed {
 }
 
 // the questions of a request, in the order of the question set
+#[doc(hidden)]
 #[derive(Debug, Default)]
 pub struct RawQuestionSet {
     questions: Vec<Box<RawValue>>,
@@ -70,6 +72,7 @@ impl Serialize for RawQuestionSet {
 }
 
 // the answers of a response, read in the order of the questions
+#[doc(hidden)]
 #[derive(Debug, Default)]
 pub struct RawAnswerSet {
     answers: HashMap<String, Value>,

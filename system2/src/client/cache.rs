@@ -37,20 +37,41 @@ struct Line<R> {
     response: R,
 }
 
+/// A cache file that the client cannot read or write.
+///
+/// [`Client::cache`](crate::Client::cache) returns it when it opens the file, and `ask` returns
+/// it in [`AskError::Cache`](crate::AskError::Cache) when it adds a response. The message does
+/// not hold the cause of the error. [`source`](std::error::Error::source) gives it.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CacheError {
+    /// The client cannot read the file, or make it.
     #[error("the client cannot read the cache file `{}`{}", path.display(), read_fix(source))]
-    Read { path: PathBuf, source: io::Error },
+    Read {
+        /// The path of the file.
+        path: PathBuf,
+        /// The error of the file system.
+        source: io::Error,
+    },
+    /// The client cannot add a response to the file, for example because the file is read-only.
     #[error("the client cannot add to the cache file `{}`", path.display())]
-    Write { path: PathBuf, source: io::Error },
+    Write {
+        /// The path of the file.
+        path: PathBuf,
+        /// The error of the file system.
+        source: io::Error,
+    },
+    /// A line of the file is not the hash of a request and its response.
     #[error(
         "line {line} of the cache file `{}` must be the hash of a request and its response",
         path.display()
     )]
     InvalidLine {
+        /// The path of the file.
         path: PathBuf,
+        /// The number of the line, from 1.
         line: usize,
+        /// The error of the JSON parser.
         source: serde_json::Error,
     },
 }

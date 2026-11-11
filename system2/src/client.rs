@@ -48,6 +48,29 @@ const MAX_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 
 static GLOBAL: Mutex<Option<Client>> = Mutex::new(None);
 
+/// A client of the TypeSafe API.
+///
+/// A client holds the settings of each request. A clone shares the connections, the cache, the
+/// limit on requests, and the total of tokens. A builder method changes only its own client.
+///
+/// `.ask` on a question set uses the global client. Its first use makes it with
+/// [`Client::from_env`]. [`Client::set_global`] replaces it.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::time::Duration;
+/// use system2::{Client, noul};
+///
+/// # async fn run() -> system2::Result<()> {
+/// let client = Client::from_env()?
+///     .model("jev-1.14.0")
+///     .timeout(Duration::from_secs(30));
+/// let urgent = noul!("Is the ticket urgent?");
+/// let answer = client.ask(urgent, "The site is down.").await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct Client {
     http: reqwest::Client,
@@ -66,10 +89,17 @@ pub struct Client {
 }
 
 impl Client {
+    /// Makes a client with the default settings, and no environment.
+    ///
+    /// The client has no API key, so it answers only from a cache until
+    /// [`api_key`](Client::api_key) gives one.
+    ///
+    /// # Panics
+    ///
+    /// Panics if TLS cannot start, as `reqwest::Client::new` does.
     #[must_use]
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "reqwest fails only when TLS cannot start, and `reqwest::Client::new` panics then"
     )]
     pub fn new() -> Self {
@@ -96,6 +126,22 @@ impl Client {
         }
     }
 
+    /// Makes a client from the environment.
+    ///
+    /// It reads five variables. It removes whitespace from the start and the end of each one. An
+    /// empty variable counts as not set.
+    ///
+    /// - `TYPESAFE_API_KEY`: the key. With no key, only the cache answers.
+    /// - `TYPESAFE_BASE_URL`: the base URL.
+    /// - `TYPESAFE_DEFAULT_MODEL`: the model.
+    /// - `SYSTEM2_CACHE`: the path of a cache file. With no path, the client has no cache.
+    /// - `SYSTEM2_OFFLINE`: `1` makes the client offline.
+    ///
+    /// # Errors
+    ///
+    /// - [`EnvError::InvalidApiKey`] if the key is not a valid HTTP header value.
+    /// - [`EnvError::InvalidBaseUrl`] if the base URL is not an absolute HTTP or HTTPS URL.
+    /// - [`EnvError::Cache`] if the client cannot open the cache file.
     pub fn from_env() -> Result<Self, EnvError> {
         let api_key = var("TYPESAFE_API_KEY");
         if let Some(api_key) = &api_key
@@ -123,29 +169,49 @@ impl Client {
         })
     }
 
+    /// Sets the API key. The default is no key.
+    ///
+    /// It removes whitespace from the start and the end of the key, and an empty key counts as no
+    /// key. The client needs a key only for a request that it sends. `ask` returns
+    /// [`AskError::MissingApiKey`] with no key, and [`AskError::InvalidApiKey`] if the key is not
+    /// a valid HTTP header value.
     #[must_use]
     pub fn api_key(self, api_key: impl Into<String>) -> Self {
         let api_key = Some(api_key.into().trim().to_owned()).filter(|key| !key.is_empty());
         Client { api_key, ..self }
     }
 
+    /// Sets the base URL of the API. The default is `https://api.typesafe.ai`.
+    ///
+    /// `ask` returns [`AskError::InvalidBaseUrl`] if the URL is not an absolute HTTP or HTTPS URL.
     #[must_use]
     pub fn base_url(self, base_url: impl Into<String>) -> Self {
         let base_url = base_url.into();
         Client { base_url, ..self }
     }
 
+    /// Sets the model. The default is `jev-latest`.
+    ///
+    /// The client does not validate the name. The API refuses an unknown model, and `ask` returns
+    /// [`AskError::Http`].
     #[must_use]
     pub fn model(self, model: impl Into<String>) -> Self {
         let model = model.into();
         Client { model, ..self }
     }
 
+    /// Sets the timeout of each attempt, from the send to the end of the response. The default is
+    /// 10 s.
     #[must_use]
     pub fn timeout(self, timeout: Duration) -> Self {
         Client { timeout, ..self }
     }
 
+    /// Sets the number of attempts after the first. The default is 2.
+    ///
+    /// A 408, a 429, a 5xx, a timeout, or a failed connection gets a retry. The wait comes from
+    /// the `retry-after-ms` or `Retry-After` header, or else from a backoff from 0.5 s to 5 s. If
+    /// a header asks for a wait of more than 30 s, the client returns the error.
     #[must_use]
     pub fn max_retries(self, max_retries: u32) -> Self {
         Client {
@@ -154,6 +220,12 @@ impl Client {
         }
     }
 
+    /// Sets the number of requests that the client and its clones send at the same time. The
+    /// default is 8.
+    ///
+    /// A request over the limit waits. An answer from the cache does not wait. A limit of 0 is a
+    /// limit of 1. On a clone, it gives a new limit, which only the later clones of that clone
+    /// share.
     #[must_use]
     pub fn max_concurrent_requests(self, max_concurrent_requests: usize) -> Self {
         // a limit of 0 stops all requests, and tokio panics past its most permits
@@ -162,6 +234,9 @@ impl Client {
         Client { limit, ..self }
     }
 
+    /// Raises the token limits of the API. The default is `false`.
+    ///
+    /// It sends the header `TypeSafe-Danger-Zone-Long-Context: true`.
     #[must_use]
     pub fn long_context(self, long_context: bool) -> Self {
         Client {
@@ -170,6 +245,7 @@ impl Client {
         }
     }
 
+    /// Sets the compression of each request body. The default is [`Compression::Zstd`].
     #[must_use]
     pub fn compression(self, compression: Compression) -> Self {
         Client {
@@ -178,16 +254,41 @@ impl Client {
         }
     }
 
+    /// Opens a cache file, and makes it the cache of the client. The default is no cache.
+    ///
+    /// The cache is a JSON Lines file. Each line holds the SHA-256 of a request body and the
+    /// response. A request with an equal body gets the stored response, with no network. A
+    /// response goes into the file only after its answers are valid. The client reads the file
+    /// only here, so it does not see the lines that another process adds later.
+    ///
+    /// It makes the file if the file does not exist, but not its folder. A file that the client
+    /// can only read, such as on a read-only file system, still gives its responses. Then `ask`
+    /// returns [`AskError::Cache`] for a new response. On a clone, it gives a new cache, which
+    /// only the later clones of that clone share.
+    ///
+    /// # Errors
+    ///
+    /// - [`CacheError::Read`] if the client cannot read or make the file.
+    /// - [`CacheError::Write`] if the last line of a writable file has no newline, and the client
+    ///   cannot add one.
+    /// - [`CacheError::InvalidLine`] if a line is not the hash of a request and its response.
     pub fn cache(self, path: impl Into<PathBuf>) -> Result<Self, CacheError> {
         let cache = Some(Arc::new(Cache::open(path.into())?));
         Ok(Client { cache, ..self })
     }
 
+    /// Makes the client answer only from the cache. The default is `false`.
+    ///
+    /// An offline request that is not in the cache returns [`AskError::Offline`].
     #[must_use]
     pub fn offline(self, offline: bool) -> Self {
         Client { offline, ..self }
     }
 
+    /// Writes the body of each request in a `TRACE` event. The default is `false`.
+    ///
+    /// The event has the target `system2::body`, and the body is in its field `system2.body`. A
+    /// body holds the state, which is often private.
     #[must_use]
     pub fn trace_bodies(self, trace_bodies: bool) -> Self {
         Client {
@@ -196,11 +297,19 @@ impl Client {
         }
     }
 
+    /// Returns the total of tokens of the client and its clones.
+    ///
+    /// It counts the tokens of each response from the API, also when the answers or the model are
+    /// not valid. An answer from the cache adds no tokens.
     #[must_use]
     pub fn usage(&self) -> Usage {
         *self.lock_usage()
     }
 
+    /// Makes the client the global client, and returns a clone of it.
+    ///
+    /// A request that `.ask` started before keeps its client. A clone of the old global client
+    /// does not change.
     #[expect(
         clippy::must_use_candidate,
         clippy::return_self_not_must_use,
@@ -210,6 +319,16 @@ impl Client {
         lock_global().insert(self).clone()
     }
 
+    /// Returns a clone of the global client.
+    ///
+    /// If there is no global client, it makes one with [`Client::from_env`], as the first `.ask`
+    /// does. A clone shares the total of tokens, so its [`usage`](Client::usage) is the total of
+    /// each `.ask` since the last [`set_global`](Client::set_global).
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`EnvError`] of [`Client::from_env`] if there is no global client, and the
+    /// environment has a bad value.
     pub fn global() -> Result<Client, EnvError> {
         let mut global = lock_global();
         if let Some(client) = global.as_ref() {
@@ -219,6 +338,17 @@ impl Client {
         Ok(global.insert(client).clone())
     }
 
+    /// Asks a question set about a state, with this client.
+    ///
+    /// It is the same as [`Ask::ask`](crate::Ask::ask), which uses the global client.
+    ///
+    /// # Errors
+    ///
+    /// The future returns an [`AskError`] if the request fails.
+    ///
+    /// # Panics
+    ///
+    /// The future panics if it sends a request outside a Tokio runtime.
     pub fn ask<Q: QuestionSet, S: Serialize + ?Sized>(
         &self,
         mut question_set: Q,
@@ -267,6 +397,18 @@ impl Client {
         AskFuture::new(question_set, request)
     }
 
+    /// Asks a question set with this client, and returns a [`Receipt`] next to the answers.
+    ///
+    /// It is the same as [`Ask::ask_with_receipt`](crate::Ask::ask_with_receipt), which uses the
+    /// global client.
+    ///
+    /// # Errors
+    ///
+    /// The future returns an [`AskError`] as [`Client::ask`] does.
+    ///
+    /// # Panics
+    ///
+    /// The future panics if it sends a request outside a Tokio runtime.
     pub fn ask_with_receipt<Q: QuestionSet, S: Serialize + ?Sized>(
         &self,
         question_set: Q,
@@ -519,24 +661,39 @@ impl Client {
     }
 }
 
+/// A variable of the environment with a bad value.
+///
+/// [`Client::from_env`] and [`Client::global`] return it. No key is not an error, because an
+/// answer from the cache needs no key.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum EnvError {
+    /// `TYPESAFE_API_KEY` is not a valid HTTP header value.
     #[error(
         "`TYPESAFE_API_KEY` must be a valid HTTP header value: \
          remove line breaks and other control characters"
     )]
     InvalidApiKey,
+    /// `TYPESAFE_BASE_URL` is not an absolute HTTP or HTTPS URL.
     #[error("`TYPESAFE_BASE_URL` must be an absolute HTTP or HTTPS URL, not `{url}`")]
-    InvalidBaseUrl { url: String },
+    InvalidBaseUrl {
+        /// The value of the variable.
+        url: String,
+    },
+    /// The client cannot open the file of `SYSTEM2_CACHE`.
     #[error(transparent)]
     Cache(CacheError),
 }
 
+/// The compression of a request body.
+///
+/// The compression does not change the tokens of a request.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Compression {
+    /// No compression, for a proxy that cannot decode zstd.
     None,
+    /// The zstd compression of each body.
     #[default]
     Zstd,
 }

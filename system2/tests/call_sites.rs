@@ -1,3 +1,5 @@
+//! Tests that run each call site of the API as a caller writes it.
+
 mod support;
 
 use serde::Serialize;
@@ -431,10 +433,13 @@ async fn sets(code: &str) -> system2::Result<()> {
     Ok(())
 }
 
+/// The answers of a review of a function.
 #[derive(Debug, Answers)]
 pub struct Review {
+    /// Is there a bug in this code?
     #[system2(question = BUGGY)]
     pub buggy: NoulAnswer,
+    /// Is the function tested?
     #[system2(question = noul!("Is the function tested?"))]
     pub tested: NoulAnswer,
 }

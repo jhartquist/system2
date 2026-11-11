@@ -3,6 +3,27 @@ use crate::{AskError, AskFuture, AskWithReceiptFuture, Client, Tagged};
 use serde::Serialize;
 use std::array;
 
+/// A group of questions that one request asks.
+///
+/// A question is a set of one. Tuples of up to 12 sets, arrays, `Vec`, and `Option` of sets are
+/// sets too. So are [`questions!`](crate::questions) and [`Questions`](crate::Questions). Sets
+/// nest. `None` asks nothing, and answers `None`. A set with no questions sends no request.
+///
+/// A set is `Clone` when each of its parts is `Clone`. A reference to a set is not a set, so
+/// clone a question to ask it again. The crate seals this trait.
+///
+/// # Examples
+///
+/// ```no_run
+/// use system2::prelude::*;
+///
+/// # async fn run() -> system2::Result<()> {
+/// let urgent = noul!("Is the ticket urgent?");
+/// let refund = noul!("Does the customer ask for a refund?");
+/// let (urgent, refund) = (urgent, refund).ask("I want my money back now.").await?;
+/// # Ok(())
+/// # }
+/// ```
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a question set",
     label = "not a question set",
@@ -12,10 +33,29 @@ use std::array;
     note = "a tag takes other data along, next to the answers: `question_set.tag(data)`"
 )]
 pub trait QuestionSet: Sized + Sealed {
+    /// The answers of the set, with the shape of the set.
     type AnswerSet;
 }
 
+/// The `ask` of a question set, with the global client.
+///
+/// Each [`QuestionSet`] implements this trait. [`Client::ask`] asks with a given client.
 pub trait Ask: QuestionSet {
+    /// Asks the set about a state, with the global client.
+    ///
+    /// The state is any `Serialize` value that serializes to text, an object, or an array, and
+    /// is not empty. `ask` serializes the state before it returns, so the future does not borrow
+    /// it. A drop of the future cancels the request.
+    ///
+    /// # Errors
+    ///
+    /// The future returns an [`AskError`] if the request fails. If there is no global client,
+    /// and [`Client::from_env`] fails, it returns [`AskError::InvalidApiKey`],
+    /// [`AskError::InvalidBaseUrl`], or [`AskError::Cache`]. A later use tries again.
+    ///
+    /// # Panics
+    ///
+    /// The future panics if it sends a request outside a Tokio runtime.
     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Self> {
         match Client::global() {
             Ok(client) => client.ask(self, state),
@@ -23,10 +63,24 @@ pub trait Ask: QuestionSet {
         }
     }
 
+    /// Asks the set about a state, and returns a [`Receipt`](crate::Receipt) next to the
+    /// answers.
+    ///
+    /// # Errors
+    ///
+    /// The future returns an [`AskError`] as [`Ask::ask`] does.
+    ///
+    /// # Panics
+    ///
+    /// The future panics if it sends a request outside a Tokio runtime.
     fn ask_with_receipt<S: Serialize + ?Sized>(self, state: &S) -> AskWithReceiptFuture<Self> {
         AskWithReceiptFuture::new(self.ask(state))
     }
 
+    /// Puts a tag next to the set, so that the answers come back next to it.
+    ///
+    /// The tag is of any type, and it is not sent. The answers of the [`Tagged`] set are
+    /// `(answers, tag)`.
     fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
@@ -34,7 +88,20 @@ pub trait Ask: QuestionSet {
 
 impl<Q: QuestionSet> Ask for Q {}
 
+/// The `ask` of an iterator of question sets.
+///
+/// An iterator is not a [`QuestionSet`], so this trait asks its sets as a `Vec`. To put an
+/// iterator in another set, collect it into a `Vec`.
 pub trait AskIterator: Iterator + Sized {
+    /// Asks each set of the iterator in one request, with the global client.
+    ///
+    /// # Errors
+    ///
+    /// The future returns an [`AskError`] as [`Ask::ask`] does.
+    ///
+    /// # Panics
+    ///
+    /// The future panics if it sends a request outside a Tokio runtime.
     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Vec<Self::Item>>
     where
         Self::Item: QuestionSet,
@@ -42,6 +109,16 @@ pub trait AskIterator: Iterator + Sized {
         Ask::ask(self.collect::<Vec<_>>(), state)
     }
 
+    /// Asks each set of the iterator, and returns a [`Receipt`](crate::Receipt) next to the
+    /// answers.
+    ///
+    /// # Errors
+    ///
+    /// The future returns an [`AskError`] as [`Ask::ask`] does.
+    ///
+    /// # Panics
+    ///
+    /// The future panics if it sends a request outside a Tokio runtime.
     fn ask_with_receipt<S: Serialize + ?Sized>(
         self,
         state: &S,

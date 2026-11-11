@@ -1,3 +1,5 @@
+//! Tests of the error types, and of their conversion into `system2::Error`.
+
 mod support;
 
 use std::path::Path;

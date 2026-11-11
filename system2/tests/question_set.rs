@@ -1,3 +1,5 @@
+//! Tests of tuples, arrays, `Vec`, and `Option` of question sets.
+
 mod support;
 
 use serde_json::json;

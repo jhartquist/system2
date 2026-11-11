@@ -1,3 +1,5 @@
+//! Tests of the compile errors of the macros and the bounds.
+
 #[test]
 fn ui_cases_fail_with_their_messages() {
     let cases = trybuild::TestCases::new();

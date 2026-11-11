@@ -1,3 +1,5 @@
+//! Tests of `questions!`, `Questions`, and the derive of `Answers`.
+
 mod support;
 
 use serde_json::{Value, json};
@@ -8,10 +10,13 @@ use support::{
 use system2::prelude::*;
 use system2::{Choice, ChoiceAnswer, Client, Noul, NoulAnswer, QuestionError, Score, ScoreAnswer};
 
+/// The answers of a review of a function.
 #[derive(Debug, Answers)]
 pub struct Review {
+    /// Is there a bug in this code?
     #[system2(question = BUGGY)]
     pub buggy: NoulAnswer,
+    /// Is the function tested?
     #[system2(question = noul!("Is the function tested?"))]
     pub tested: NoulAnswer,
 }
@@ -234,6 +239,7 @@ fn problem_answer() -> Value {
 }
 
 // a public set can hold the answer of a private type, as each struct can
+/// The verdict of a review: the kind of its problem.
 #[derive(Answers)]
 pub struct Verdict {
     #[system2(question = PROBLEM)]

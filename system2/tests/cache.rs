@@ -1,3 +1,5 @@
+//! Tests of the cache file of a client.
+
 mod support;
 
 use serde::Serialize;

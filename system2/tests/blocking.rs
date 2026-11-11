@@ -1,3 +1,5 @@
+//! Tests of `system2::blocking` against a mock server.
+
 mod support;
 
 use std::time::Duration;

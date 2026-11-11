@@ -1,3 +1,5 @@
+//! Tests of the facts of the TypeSafe API. They replay offline from recorded responses.
+
 // the answers replay offline from `live.jsonl`. to record them again, delete the file and run
 // `SYSTEM2_RECORD=1 cargo test --test live -- --include-ignored` with `TYPESAFE_API_KEY`. the
 // tests of openrouter need `OPENROUTER_API_KEY`

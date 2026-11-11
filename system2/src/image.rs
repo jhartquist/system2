@@ -21,6 +21,37 @@ pub(crate) use registry::find;
 const REFERENCE_PREFIX: &str = "s2-img-";
 const REFERENCE_HEX_DIGITS: usize = 16;
 
+/// A PNG or JPEG image that goes where text goes.
+///
+/// An image goes in a state, a question, or an option, through `format!`, `json!`, or a struct.
+/// It displays and serializes as its reference: `s2-img-` and 16 hex digits of its SHA-256.
+/// `ask` finds each reference in the text values of the request, and sends the bytes of its
+/// image. A reference in an object key, such as the name of an option, stays text. A clone shares
+/// the bytes.
+///
+/// [`image!`](crate::image) makes an image that the compiler checks. [`Image::new`] makes one
+/// from data. With the `image` feature, `TryFrom` converts an `image::DynamicImage` into an
+/// image, and an `&Image` into a `DynamicImage`.
+///
+/// An image keeps its original: the image that the caller gave, upright. With the `image`
+/// feature, `DynamicImage::try_from(&image)` gives the place of the image in its original, with
+/// all of its detail.
+///
+/// # Examples
+///
+/// ```no_run
+/// use serde_json::json;
+/// use system2::prelude::*;
+/// use system2::Image;
+///
+/// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
+/// let screenshot = Image::new(std::fs::read("screenshot.png")?)?;
+/// let state = json!({ "screenshot": screenshot, "message": "The app shows an error." });
+/// let answer = noul!("Does the screenshot show the error?").ask(&state).await?;
+/// let answer = noul!("Is there a dialog in {screenshot}?").ask("A screenshot.").await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct Image {
     width: u32,
@@ -32,6 +63,31 @@ pub struct Image {
 }
 
 impl Image {
+    /// Makes an image from bytes, and validates it.
+    ///
+    /// Without the `image` feature, the image must be PNG or JPEG, with no EXIF orientation that
+    /// turns or mirrors it. Each side must be 280 to 1568 px, and the image must have 16 MiB or
+    /// less. An image that passes keeps its bytes, with no copy.
+    ///
+    /// The `image` feature also takes WebP, and the first frame of a GIF, of each size and
+    /// orientation. It turns the pixels upright, and scales the image into the limits. A JPEG
+    /// stays a JPEG, and each other format becomes a PNG. An image that passes without the
+    /// feature does not change.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidImage::Format`] if the image is not PNG or JPEG, without the `image` feature.
+    /// - [`InvalidImage::Header`] if the PNG or JPEG header is not complete, without the `image`
+    ///   feature.
+    /// - [`InvalidImage::Size`] if a side is out of the limits, without the `image` feature. With
+    ///   the feature, if the long side is more than 5.6 times the short side.
+    /// - [`InvalidImage::Bytes`] if the image has more than 16 MiB, without the `image` feature.
+    /// - [`InvalidImage::Orientation`] if the EXIF orientation turns or mirrors the image, without
+    ///   the `image` feature.
+    /// - [`InvalidImage::Reference`] if a different image has the same reference.
+    /// - `InvalidImage::Decode` if the image needs a conversion, and does not decode, with the
+    ///   `image` feature. Also if its pixels need more than 512 MiB of memory. An image that
+    ///   passes without the feature is not decoded.
     pub fn new(bytes: impl Into<Vec<u8>>) -> Result<Self, InvalidImage> {
         let bytes = bytes.into();
         #[cfg(feature = "image")]
@@ -74,6 +130,22 @@ impl Image {
         })
     }
 
+    /// Cuts a region from the original of the image, with all of its detail.
+    ///
+    /// The region is in the pixels of the original, as [`BboxAnswer::to_pixels`] gives it. The
+    /// crop is a new image, which `Image::new` converts, and it shares the original. A
+    /// [`BboxAnswer`] on the crop also gives the pixels of the original. `crop` decodes the
+    /// original each time.
+    ///
+    /// # Errors
+    ///
+    /// - `InvalidImage::Region` if the region is not in the original, or has no area. Also if
+    ///   its long side is more than 5.6 times its short side.
+    /// - `InvalidImage::Decode` if the original does not decode, or the crop does not encode.
+    ///   Also if the pixels of the original need more than 512 MiB of memory.
+    ///
+    /// [`BboxAnswer`]: crate::BboxAnswer
+    /// [`BboxAnswer::to_pixels`]: crate::BboxAnswer::to_pixels
     #[cfg(feature = "image")]
     pub fn crop(&self, region: PixelBox) -> Result<Image, InvalidImage> {
         let (original, format) = self.original.decode()?;
@@ -101,11 +173,13 @@ impl Image {
         Image::with_original(bytes, region, self.original.clone())
     }
 
+    /// Returns the width that the API sees, in pixels.
     #[must_use]
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    /// Returns the height that the API sees, in pixels.
     #[must_use]
     pub fn height(&self) -> u32 {
         self.height
@@ -128,13 +202,21 @@ impl Image {
     }
 }
 
+/// An image that breaks a rule of [`Image::new`], or a region that `Image::crop` refuses.
+///
+/// Without the `image` feature, the message of each rule that the feature fixes names the
+/// feature as the fix.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidImage {
+    /// The image is not PNG or JPEG.
     #[error("the image must be PNG or JPEG: turn on the `image` feature of system2 to convert it")]
     Format,
+    /// The PNG or JPEG header is not complete.
     #[error("the image must have a complete PNG or JPEG header")]
     Header,
+    /// A side is out of the limits of 280 to 1568 px. With the `image` feature, the long side is
+    /// more than 5.6 times the short side, and no scale fits.
     #[cfg_attr(
         not(feature = "image"),
         error(
@@ -149,26 +231,46 @@ pub enum InvalidImage {
              not {width}x{height}: crop it"
         )
     )]
-    Size { width: u32, height: u32 },
+    Size {
+        /// The width, in pixels.
+        width: u32,
+        /// The height, in pixels.
+        height: u32,
+    },
+    /// The image has more than 16 MiB.
     #[error(
         "the image must have at most 16 MiB, not {size} bytes: \
          turn on the `image` feature of system2 to make it smaller"
     )]
-    Bytes { size: usize },
+    Bytes {
+        /// The size of the image, in bytes.
+        size: usize,
+    },
+    /// The EXIF orientation turns or mirrors the image. The API ignores the orientation.
     #[error(
         "the image must be upright, but its EXIF orientation {orientation} turns or mirrors it, \
          and the API ignores the orientation: turn on the `image` feature of system2 to turn its \
          pixels"
     )]
-    Orientation { orientation: u16 },
+    Orientation {
+        /// The value of the EXIF orientation, from 2 to 8.
+        orientation: u16,
+    },
+    /// A different image has the same reference.
     #[error(
         "each image must have a different reference, but a different image has the reference \
          `{reference}`: change a byte of one of them"
     )]
-    Reference { reference: String },
+    Reference {
+        /// The reference of the two images.
+        reference: String,
+    },
+    /// The image does not decode, its pixels need more than 512 MiB of memory, or a crop does
+    /// not encode.
     #[cfg(feature = "image")]
     #[error("the image must be a valid PNG, JPEG, WebP, or GIF")]
     Decode(#[from] ::image::ImageError),
+    /// The region of a crop is not in the original, has no area, or does not fit.
     #[cfg(feature = "image")]
     #[error(
         "the region must be in the original of {width}x{height} px, have an area, and have a long \
@@ -179,8 +281,11 @@ pub enum InvalidImage {
         region.bottom
     )]
     Region {
+        /// The region of the crop.
         region: PixelBox,
+        /// The width of the original, in pixels.
         width: u32,
+        /// The height of the original, in pixels.
         height: u32,
     },
 }
@@ -360,6 +465,23 @@ const fn static_header(bytes: &[u8]) -> Header {
     }
 }
 
+/// Makes an [`Image`] that the compiler checks.
+///
+/// It takes a path, as `include_bytes!` does, or a constant of the type `&'static [u8]`. It
+/// validates the image as [`Image::new`] does, when the crate builds. With the `image` feature, it
+/// also converts the file of a path, and keeps the file as the original. A macro cannot read the
+/// value of a constant, so it only validates a constant.
+///
+/// # Examples
+///
+/// ```
+/// use system2::{Image, image};
+///
+/// const SQUARE: Image = image!("../tests/images/square.png");
+/// const RED: Image = image!(include_bytes!("../tests/images/red.png"));
+///
+/// assert!(SQUARE.to_string().starts_with("s2-img-"));
+/// ```
 #[macro_export]
 macro_rules! image {
     ($path:literal) => {

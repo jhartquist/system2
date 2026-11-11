@@ -1,3 +1,5 @@
+//! Tests of `Image` and `image!` without the `image` feature.
+
 // the images of one test file share a registry, so each test makes images of its own size
 
 mod support;

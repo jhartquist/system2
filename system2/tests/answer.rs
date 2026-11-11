@@ -1,3 +1,5 @@
+//! Tests of `answer`, which builds the answer of each question type for a test.
+
 mod support;
 
 use serde_json::json;

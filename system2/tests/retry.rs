@@ -1,3 +1,5 @@
+//! Tests of the retries of a request.
+
 mod support;
 
 use std::sync::atomic::Ordering;

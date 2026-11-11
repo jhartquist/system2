@@ -9,20 +9,37 @@ use std::io::Cursor;
 // a photo of 12 megapixels becomes about 60 KB at 1568x1176
 const JPEG_QUALITY: u8 = 90;
 
+/// An image that the conversion cannot take.
 #[derive(Debug)]
 pub enum ConvertError {
+    /// The image does not decode, its pixels need too much memory, or it does not encode.
     Decode(ImageError),
-    Size { width: u32, height: u32 },
+    /// No scale fits both sides of the image in the limits.
+    Size {
+        /// The width, in pixels.
+        width: u32,
+        /// The height, in pixels.
+        height: u32,
+    },
 }
 
-// the image that the model sees, and the size of the upright original
+/// The image that the model sees, and the size of the upright original.
 #[derive(Debug)]
 pub struct Converted {
+    /// The bytes of the converted image.
     pub bytes: Vec<u8>,
+    /// The size of the upright original.
     pub original: Header,
 }
 
-// none when the image passes as it is, so that it keeps its bytes
+/// Converts an image into the limits of the API.
+///
+/// Returns `None` when the image passes as it is, so that it keeps its bytes.
+///
+/// # Errors
+///
+/// Returns [`ConvertError::Decode`] if the image does not decode, and [`ConvertError::Size`] if
+/// no scale fits it.
 pub fn convert(bytes: &[u8]) -> Result<Option<Converted>, ConvertError> {
     if read_header(bytes).is_ok() {
         return Ok(None);
@@ -36,7 +53,14 @@ pub fn convert(bytes: &[u8]) -> Result<Option<Converted>, ConvertError> {
     Ok(Some(Converted { bytes, original }))
 }
 
-// the pixels upright by the exif orientation, because the api ignores it
+/// Decodes an image, with its pixels upright by its EXIF orientation.
+///
+/// The API ignores the orientation, so the pixels must be upright.
+///
+/// # Errors
+///
+/// Returns the [`ImageError`] of the decoder. Returns [`ImageError::Limits`] if the pixels need
+/// more than 512 MiB of memory, before the decode allocates them.
 pub fn decode(bytes: &[u8]) -> Result<(DynamicImage, Option<ImageFormat>), ImageError> {
     let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -53,8 +77,15 @@ pub fn decode(bytes: &[u8]) -> Result<(DynamicImage, Option<ImageFormat>), Image
     Ok((image, format))
 }
 
-// a jpeg stays a jpeg, and each other format becomes a png, so that text stays sharp. each
-// channel gets 8 bits, so that a png of 1568x1568 px stays under 16 MiB
+/// Scales an image into the limits of the API, and encodes it.
+///
+/// A JPEG stays a JPEG. Each other format becomes a PNG, so that text stays sharp.
+///
+/// # Errors
+///
+/// Returns [`ConvertError::Size`] if no scale fits the image, and [`ConvertError::Decode`] if the
+/// encoder fails.
+// each channel gets 8 bits, so that a png of 1568x1568 px stays under 16 MiB
 pub fn encode(image: &DynamicImage, format: Option<ImageFormat>) -> Result<Vec<u8>, ConvertError> {
     let (width, height) = (image.width(), image.height());
     let Some((fitted_width, fitted_height)) = fitted_size(width, height) else {
@@ -83,7 +114,10 @@ fn png_encoder(bytes: &mut Vec<u8>) -> PngEncoder<&mut Vec<u8>> {
     PngEncoder::new_with_quality(bytes, CompressionType::Default, png::FilterType::Adaptive)
 }
 
-// one factor for both sides keeps the aspect ratio. none when no factor fits both sides
+/// Returns the size that fits the limits of the API, with the same aspect ratio.
+///
+/// Returns `None` when no scale fits both sides.
+// one factor for both sides keeps the aspect ratio
 #[must_use]
 pub fn fitted_size(width: u32, height: u32) -> Option<(u32, u32)> {
     let (long, short) = (width.max(height), width.min(height));

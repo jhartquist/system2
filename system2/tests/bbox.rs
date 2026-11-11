@@ -1,3 +1,5 @@
+//! Tests of `Bbox`, `bbox!`, and `BboxAnswer` against a mock server.
+
 mod support;
 
 use serde_json::json;

@@ -6,6 +6,120 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::{RawValue, to_raw_value};
 use std::collections::HashMap;
 
+/// A yes-or-no question.
+///
+/// A Noul has instructions, plus optional criteria that spell out what a yes and a no mean.
+/// Asking it gives you a [`NoulAnswer`] with the probability of yes. Use [`noul!`](crate::noul)
+/// when you know the question at compile time, so the compiler checks it, and [`Noul::new`] when
+/// it comes from data.
+///
+/// # Examples
+///
+/// The smallest Noul is a line of text:
+///
+/// ```
+/// use system2::Noul;
+///
+/// let urgent = Noul::new("Is the ticket urgent?")?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// The text can come from data:
+///
+/// ```
+/// # use system2::Noul;
+/// let product = "the mobile app".to_string();
+/// let about = Noul::new(format!("Is the ticket about {product}?"))?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// The instructions can also be JSON, which gives each part a name:
+///
+/// ```
+/// use serde_json::json;
+/// # use system2::Noul;
+///
+/// let policy = "A reply never promises a date.".to_string();
+/// let obeys = Noul::new(json!({
+///     "question": "Does the reply obey the policy?",
+///     "policy": policy,
+/// }))?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// A struct that derives `Serialize` works the same way:
+///
+/// ```
+/// use serde::Serialize;
+/// # use system2::Noul;
+///
+/// #[derive(Serialize)]
+/// struct Rule {
+///     question: String,
+///     policy: String,
+/// }
+///
+/// let rule = Rule {
+///     question: "Does the reply obey the policy?".to_string(),
+///     policy: "A reply never promises a date.".to_string(),
+/// };
+/// let obeys = Noul::new(rule)?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// Criteria spell out what a yes and a no mean:
+///
+/// ```
+/// use serde_json::json;
+/// # use system2::Noul;
+///
+/// let refund = Noul::with_criteria(
+///     "Does the customer ask for a refund?",
+///     json!({
+///         "true": "The customer wants the money back.",
+///         "false": "The customer wants no money.",
+///     }),
+/// )?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// You can give only one of them, and they can come from a map:
+///
+/// ```
+/// use std::collections::BTreeMap;
+/// # use system2::Noul;
+///
+/// let criteria = BTreeMap::from([("true", "The site is down for the customer.")]);
+/// let urgent = Noul::with_criteria("Is the ticket urgent?", criteria)?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// [`noul!`](crate::noul) takes the same forms and checks them at compile time. A question with
+/// no variables in it can be a constant:
+///
+/// ```no_run
+/// use system2::prelude::*;
+/// use system2::Noul;
+///
+/// const URGENT: Noul = noul!("Is the ticket urgent?");
+/// const REFUND: Noul = noul!("Does the customer ask for a refund?", {
+///     "true": "The customer wants the money back.",
+///     "false": "The customer wants no money.",
+/// });
+/// const POLICY: Noul = noul!({
+///     "question": "Does the reply obey the policy?",
+///     "policy": "A reply never promises a date.",
+/// });
+///
+/// # async fn run() -> system2::Result<()> {
+/// let product = "the mobile app";
+/// let about = noul!("Is the ticket about {product}?");
+///
+/// let answer = URGENT.ask("The site is down.").await?;
+/// if answer.is_likely() { /* … */ }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Noul {
     instructions: Json,
@@ -21,6 +135,15 @@ struct Criteria {
 }
 
 impl Noul {
+    /// Makes a Noul from instructions that come from data.
+    ///
+    /// The instructions can be any `Serialize` value, as long as it serializes to text, an
+    /// object, or an array.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidNoul::Instructions`] if the instructions fail to serialize, are empty, or
+    /// are a bare number or `bool`.
     pub fn new(instructions: impl Serialize) -> Result<Self, InvalidNoul> {
         let instructions = json::validate(instructions).map_err(InvalidNoul::Instructions)?;
         let instructions = Json::from(instructions);
@@ -34,6 +157,19 @@ impl Noul {
         })
     }
 
+    /// Makes a Noul from instructions and criteria that come from data.
+    ///
+    /// The criteria must serialize to an object with a `"true"` key, a `"false"` key, or both.
+    /// Each criterion says what that answer means, and follows the same rules as the
+    /// instructions.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidNoul::Instructions`] if the instructions break a rule of [`Noul::new`].
+    /// - [`InvalidNoul::Criteria`] if the criteria are not an object, have any other key, or
+    ///   are empty.
+    /// - [`InvalidNoul::True`] or [`InvalidNoul::False`] if that criterion breaks a rule of the
+    ///   instructions.
     pub fn with_criteria(
         instructions: impl Serialize,
         criteria: impl Serialize,
@@ -47,10 +183,22 @@ impl Noul {
         })
     }
 
+    /// Attaches a tag to the question, so the answer comes back with it.
+    ///
+    /// This is the same as [`Ask::tag`](crate::Ask::tag), but as a `const fn`, so you can keep a
+    /// tagged question in a constant.
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
 
+    /// Builds the answer that a response with this probability of yes would give.
+    ///
+    /// It's for tests of your own decision code: hand the answer to the code that decides, with
+    /// no request. It goes through the same checks as a response from the API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidAnswer`] if the probability is not from 0 to 1.
     pub fn answer(self, probability: f64) -> Result<NoulAnswer, InvalidAnswer> {
         self.validated_answer(probability)
             .map_err(InvalidAnswer::new)
@@ -100,19 +248,27 @@ impl QuestionSet for Noul {
     type AnswerSet = NoulAnswer;
 }
 
+/// The error from [`Noul::new`] and [`Noul::with_criteria`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidNoul {
+    /// The instructions are invalid.
     #[error("the instructions {0}")]
     Instructions(InvalidJson),
+    /// The criteria are not an object with a `true` key, a `false` key, or both.
     #[error("the criteria must be an object with the key `true`, the key `false`, or both")]
     Criteria,
+    /// The `true` criterion is invalid.
     #[error("the `true` criterion {0}")]
     True(InvalidJson),
+    /// The `false` criterion is invalid.
     #[error("the `false` criterion {0}")]
     False(InvalidJson),
 }
 
+/// The answer to a [`Noul`]: the probability of yes.
+///
+/// Serializes as `{"probability": p}`.
 #[derive(Debug, Clone)]
 pub struct NoulAnswer {
     question: Noul,
@@ -120,21 +276,25 @@ pub struct NoulAnswer {
 }
 
 impl NoulAnswer {
+    /// Returns the question this answer is for.
     #[must_use]
     pub fn question(&self) -> &Noul {
         &self.question
     }
 
+    /// Returns the question by value, so you can ask it again.
     #[must_use]
     pub fn into_question(self) -> Noul {
         self.question
     }
 
+    /// Returns the probability of yes, from 0 to 1, exactly as the API gives it.
     #[must_use]
     pub fn probability(&self) -> f64 {
         self.probability
     }
 
+    /// Returns `true` if the probability of yes is 0.5 or more.
     #[must_use]
     pub fn is_likely(&self) -> bool {
         self.probability >= 0.5

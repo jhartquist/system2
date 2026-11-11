@@ -1,3 +1,5 @@
+//! The validation and the conversion of images.
+
 #[cfg(feature = "image")]
 mod convert;
 mod header;

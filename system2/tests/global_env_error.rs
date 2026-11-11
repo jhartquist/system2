@@ -1,3 +1,5 @@
+//! Tests of the first `.ask` with a bad variable in the environment.
+
 mod support;
 
 use std::{env, fs};

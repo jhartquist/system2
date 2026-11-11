@@ -150,13 +150,21 @@ pub const fn is_blank(text: &str) -> bool {
     }
 }
 
+/// A value that is not valid JSON for the API, as a part of another error.
+///
+/// The instructions, each criterion, each description, each level, and the state follow its
+/// rules. Each message completes the message of its error, as in "the instructions must not be
+/// empty".
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidJson {
+    /// The value does not serialize to JSON.
     #[error("must serialize to JSON: {0}")]
     Serialize(serde_json::Error),
+    /// The value is a bare number or `bool`.
     #[error("must be text, an object, or an array")]
     Shape,
+    /// The value is only whitespace, `[]`, `{}`, or `null`.
     #[error("must not be empty")]
     Empty,
 }

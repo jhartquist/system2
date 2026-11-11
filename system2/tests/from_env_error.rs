@@ -1,3 +1,5 @@
+//! Tests of `Client::from_env` with bad variables.
+
 mod support;
 
 use std::env;

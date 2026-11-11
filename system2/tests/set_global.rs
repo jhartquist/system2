@@ -1,3 +1,5 @@
+//! Tests of `Client::set_global`.
+
 mod support;
 
 use support::{INSTRUCTIONS, STATE, client_for, mock_api, noul, noul_response};

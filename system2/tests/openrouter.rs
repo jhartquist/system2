@@ -1,3 +1,6 @@
+//! Tests of `https://openrouter.ai/api` as the base URL: the JSON body of images, its errors,
+//! and its request ID.
+
 // the mock stands in for openrouter as a proxy, so the client sees the host of openrouter
 
 mod support;

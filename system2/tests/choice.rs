@@ -1,3 +1,5 @@
+//! Tests of `Choice`, `choice!`, and `ChoiceAnswer` against a mock server.
+
 mod support;
 
 use serde_json::{Value, json};

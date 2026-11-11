@@ -1,3 +1,5 @@
+//! Tests of `Noul`, `noul!`, and `NoulAnswer` against a mock server.
+
 mod support;
 
 use std::cell::RefCell;

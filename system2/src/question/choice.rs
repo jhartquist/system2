@@ -11,6 +11,110 @@ use std::fmt::Display;
 use std::iter;
 use system2_shared::choice::{self, MAX_OPTIONS};
 
+/// A question with one answer from a list of options.
+///
+/// Each option has a name, an optional description, and a value of the type `O`. The answer is a
+/// [`ChoiceAnswer`], with the probability of each option, and it gives the values back.
+/// [`choice!`](crate::choice) makes a Choice that the compiler checks. The constructors make one
+/// from data. A Choice has 1 to 255 options, and each name is different.
+///
+/// # Examples
+///
+/// The smallest Choice has a list of names, and the answer gives a name back:
+///
+/// ```
+/// use system2::Choice;
+///
+/// let team = Choice::new(
+///     "Which team must answer the ticket?",
+///     ["billing", "engineering", "support"],
+/// )?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// A description tells Jev what an option means:
+///
+/// ```
+/// # use system2::Choice;
+/// let teams = [
+///     ("billing", "Payments, invoices, and refunds."),
+///     ("engineering", "Bugs and outages."),
+/// ];
+/// let team = Choice::with_descriptions("Which team must answer the ticket?", teams)?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// An option can be a value of the caller. A closure gives its name, or its name and
+/// description, and the answer gives the value back:
+///
+/// ```
+/// # use system2::Choice;
+/// struct Team {
+///     name: String,
+///     duties: String,
+///     email: String,
+/// }
+///
+/// let teams = vec![Team {
+///     name: "billing".to_string(),
+///     duties: "Payments, invoices, and refunds.".to_string(),
+///     email: "billing@example.com".to_string(),
+/// }];
+/// let by_name = Choice::with_values("Which team must answer?", &teams, |team| &team.name)?;
+/// let described = Choice::with_values("Which team must answer?", &teams, |team| {
+///     (&team.name, &team.duties)
+/// })?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// An enum that derives [`Options`] gives its variants as the options. Each doc comment is a
+/// description:
+///
+/// ```
+/// use system2::Options;
+/// # use system2::Choice;
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Options)]
+/// enum Team {
+///     /// Payments, invoices, and refunds.
+///     Billing,
+///     /// Bugs and outages.
+///     Engineering,
+/// }
+///
+/// let instructions = "Which team must answer the ticket?".to_string();
+/// let team = Choice::<Team>::of(instructions)?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// [`choice!`](crate::choice) takes the same forms, and the compiler checks them. A question
+/// with no variable can be a constant:
+///
+/// ```no_run
+/// use system2::prelude::*;
+/// use system2::Choice;
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Options)]
+/// enum Team {
+///     /// Payments, invoices, and refunds.
+///     Billing,
+///     /// Bugs and outages.
+///     Engineering,
+/// }
+///
+/// const TEAM: Choice<Team> = choice!("Which team must answer the ticket?", Team);
+/// const LANGUAGE: Choice<&str> = choice!("Which language is the ticket in?", ["en", "de", "fr"]);
+/// const NEXT: Choice<&str> = choice!("What is the next step?", {
+///     "reply": "Reply to the customer.",
+///     "escalate": "Give the ticket to an engineer.",
+/// });
+///
+/// # async fn run() -> system2::Result<()> {
+/// let team = TEAM.ask("The site is down.").await?;
+/// if *team.most_likely() == Team::Engineering && team.confidence() > 0.8 { /* … */ }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Choice<O> {
     instructions: Json,
@@ -29,6 +133,10 @@ struct Entry<O> {
     value: O,
 }
 
+/// The options of a [`Choice`], from an enum.
+///
+/// Only [`derive(Options)`](macro@crate::Options) implements it. A caller names the trait in a
+/// bound, as in `O: Options`. For options that are not an enum, use [`Choice::with_values`].
 #[diagnostic::on_unimplemented(
     message = "`{Self}` must derive `Options` to give the options of a Choice",
     label = "does not derive `Options`",
@@ -52,6 +160,11 @@ pub struct ChoiceOption<O> {
     pub value: fn() -> O,
 }
 
+/// The label that the closure of [`Choice::with_values`] gives for a value.
+///
+/// A label is a name, or a `(name, description)` pair. A name is text, such as a `&str`, a
+/// `String`, or a `Cow<str>`, or an integer. A description is any `Serialize` value. The crate
+/// seals this trait.
 pub trait Label: label::Parts {}
 
 impl<L: label::Parts> Label for L {}
@@ -106,6 +219,17 @@ mod label {
 }
 
 impl<O> Choice<O> {
+    /// Makes a Choice with an option for each item. The `Display` of an item is its name.
+    ///
+    /// The options have no descriptions. The answer gives the items back.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidChoice::Instructions`] if the instructions do not serialize, are empty, or are
+    ///   a bare number or `bool`.
+    /// - [`InvalidChoice::EmptyName`] if a name is only whitespace.
+    /// - [`InvalidChoice::Count`] if there are no items, or more than 255.
+    /// - [`InvalidChoice::Duplicate`] if two items have the same name.
     pub fn new(
         instructions: impl Serialize,
         items: impl IntoIterator<Item = O>,
@@ -116,6 +240,20 @@ impl<O> Choice<O> {
         Self::with_values(instructions, items, ToString::to_string)
     }
 
+    /// Makes a Choice from `(name, description)` pairs. The `Display` of a name is the name.
+    ///
+    /// The pairs can be owned or borrowed, such as a `Vec`, a `&BTreeMap`, or a
+    /// `&serde_json::Map`. A description is any `Serialize` value. A description of `()` or
+    /// `None` sends no description. The answer gives the name back.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidChoice::Instructions`] if the instructions do not serialize, are empty, or are
+    ///   a bare number or `bool`.
+    /// - [`InvalidChoice::Description`] if a description breaks a rule of the instructions.
+    /// - [`InvalidChoice::EmptyName`] if a name is only whitespace.
+    /// - [`InvalidChoice::Count`] if there are no options, or more than 255.
+    /// - [`InvalidChoice::Duplicate`] if two options have the same name.
     pub fn with_descriptions<D: Serialize>(
         instructions: impl Serialize,
         options: impl IntoIterator<Item = (O, D)>,
@@ -135,6 +273,19 @@ impl<O> Choice<O> {
         Self::validated(instructions, options)
     }
 
+    /// Makes a Choice from the values of the caller, and a closure that gives their labels.
+    ///
+    /// The closure gives a [`Label`]: a name, or a name and a description. The values need no
+    /// `Clone`, and the answer gives a value back.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidChoice::Instructions`] if the instructions do not serialize, are empty, or are
+    ///   a bare number or `bool`.
+    /// - [`InvalidChoice::Description`] if a description breaks a rule of the instructions.
+    /// - [`InvalidChoice::EmptyName`] if a name is only whitespace.
+    /// - [`InvalidChoice::Count`] if there are no values, or more than 255.
+    /// - [`InvalidChoice::Duplicate`] if two values have the same name.
     pub fn with_values<L: Label>(
         instructions: impl Serialize,
         values: impl IntoIterator<Item = O>,
@@ -151,6 +302,15 @@ impl<O> Choice<O> {
         Self::validated(instructions, options)
     }
 
+    /// Makes a Choice from instructions that come from data, with the options of the type `O`.
+    ///
+    /// It validates the options of `O` again, as [`Choice::with_values`] does.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidChoice::Instructions`] if the instructions do not serialize, are empty, or are a
+    /// bare number or `bool`. The derive of [`Options`] validates the options, so another variant
+    /// does not occur.
     pub fn of(instructions: impl Serialize) -> Result<Self, InvalidChoice>
     where
         O: Options,
@@ -166,10 +326,36 @@ impl<O> Choice<O> {
         Self::validated(instructions, options)
     }
 
+    /// Puts a tag next to the question, so that the answer comes back next to it.
+    ///
+    /// It is the same as [`Ask::tag`](crate::Ask::tag), but it is a `const fn`, so a constant can
+    /// hold a tagged question.
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
 
+    /// Builds the answer that a response with these values would give.
+    ///
+    /// `most_likely` is the option that the API chose, `confidence` is its confidence, and
+    /// `probabilities` has one probability for each option, in the order of the question. It's
+    /// for tests of your own decision code, and it goes through the same checks as a response
+    /// from the API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidAnswer`] if `most_likely` is not an option of the question, if there is
+    /// not one probability for each option, or if a value is not from 0 to 1.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use system2::prelude::*;
+    ///
+    /// let team = choice!("Which team should handle this ticket?", ["billing", "support"])
+    ///     .answer(&"billing", 0.8, [0.9, 0.1])?;
+    /// assert_eq!(*team.most_likely(), "billing");
+    /// # Ok::<(), system2::InvalidAnswer>(())
+    /// ```
     pub fn answer(
         mut self,
         most_likely: &O,
@@ -303,21 +489,44 @@ impl<O> QuestionSet for Choice<O> {
     type AnswerSet = ChoiceAnswer<O>;
 }
 
+/// An error of a constructor of [`Choice`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidChoice {
+    /// The instructions are not valid.
     #[error("the instructions {0}")]
     Instructions(InvalidJson),
+    /// The name of an option is only whitespace.
     #[error("the option at index {index} must have a name that is not empty")]
-    EmptyName { index: usize },
+    EmptyName {
+        /// The index of the option, from 0.
+        index: usize,
+    },
+    /// The description of an option is not valid.
     #[error("the description of the option `{name}` {error}")]
-    Description { name: String, error: InvalidJson },
+    Description {
+        /// The name of the option.
+        name: String,
+        /// The rule that the description breaks.
+        error: InvalidJson,
+    },
+    /// The Choice has no options, or more than 255. The value is the number of options.
     #[error("{}", choice::count_message(*.0))]
     Count(usize),
+    /// Two options have the same name.
     #[error("{}", choice::duplicate_message(.name))]
-    Duplicate { name: String },
+    Duplicate {
+        /// The name of the two options.
+        name: String,
+    },
 }
 
+/// The answer to a [`Choice`]: the probability of each option.
+///
+/// Each method that gives probabilities gives pairs of a value and its probability. A method
+/// that borrows gives `(&O, f64)`, and a method that consumes the answer gives `(O, f64)`. It
+/// serializes as `{"most_likely": name, "confidence": c, "options": [name, …], "probabilities":
+/// [p, …]}`, so a value needs no `Serialize`.
 #[derive(Debug, Clone)]
 pub struct ChoiceAnswer<O> {
     question: Choice<O>,
@@ -327,27 +536,35 @@ pub struct ChoiceAnswer<O> {
 }
 
 impl<O> ChoiceAnswer<O> {
+    /// Returns the question of the answer.
     #[must_use]
     pub fn question(&self) -> &Choice<O> {
         &self.question
     }
 
+    /// Returns the question of the answer, with its values, so that code can ask it again.
     #[must_use]
     pub fn into_question(self) -> Choice<O> {
         self.question
     }
 
+    /// Returns the value of the option that the API chose.
     #[must_use]
     pub fn most_likely(&self) -> &O {
         &self.question.options.as_entries()[self.choice].value
     }
 
+    /// Returns the value of the option that the API chose, owned.
     #[must_use]
     pub fn into_most_likely(self) -> O {
         let mut options = self.question.options.into_entries();
         options.swap_remove(self.choice).value
     }
 
+    /// Returns the `n` most likely options, from the highest probability.
+    ///
+    /// The option that the API chose comes first, also when another option has an equal
+    /// probability. The other options with equal probabilities keep the order of the question.
     pub fn top(&self, n: usize) -> impl Iterator<Item = (&O, f64)> {
         let mut ranked: Vec<_> = self.probabilities().collect();
 
@@ -360,11 +577,13 @@ impl<O> ChoiceAnswer<O> {
         iter::once(most_likely).chain(ranked).take(n)
     }
 
+    /// Returns the confidence of the API in its choice, from 0 to 1.
     #[must_use]
     pub fn confidence(&self) -> f64 {
         self.confidence
     }
 
+    /// Returns each option and its probability, in the order of the question.
     pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&O, f64)> {
         self.question
             .options
@@ -374,6 +593,7 @@ impl<O> ChoiceAnswer<O> {
             .map(|(option, &probability)| (&option.value, probability))
     }
 
+    /// Returns each option and its probability, owned, in the order of the question.
     #[must_use]
     pub fn into_probabilities(self) -> Vec<(O, f64)> {
         self.question

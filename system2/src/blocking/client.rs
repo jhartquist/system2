@@ -4,6 +4,28 @@ use std::fmt;
 use std::sync::Arc;
 use tokio::runtime::{self, Handle, Runtime};
 
+/// A client that waits for the answers.
+///
+/// `Client::from` takes a [`system2::Client`](crate::Client) with its settings. The builder
+/// methods are only on that client. The blocking client shares its connections, its cache, its
+/// limit on requests, and its total of tokens.
+///
+/// Each blocking client has a Tokio runtime with one worker thread, and its clones share it. A
+/// drop of the last clone in an async runtime panics, because Tokio cannot stop a runtime there.
+///
+/// # Examples
+///
+/// ```no_run
+/// use system2::{Client, blocking, noul};
+///
+/// fn main() -> system2::Result<()> {
+///     let client = blocking::Client::from(Client::from_env()?.model("jev-1.14.0"));
+///     let urgent = noul!("Is the ticket urgent?");
+///     let (answer, receipt) = client.ask_with_receipt(urgent, "The site is down.")?;
+///     println!("{:.2}, {} tokens in", answer.probability(), receipt.usage.input_tokens);
+///     Ok(())
+/// }
+/// ```
 #[derive(Clone)]
 pub struct Client {
     client: crate::Client,
@@ -25,6 +47,15 @@ impl Drop for OwnedRuntime {
 }
 
 impl Client {
+    /// Asks a question set about a state, with this client, and waits for the answers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AskError`] as [`crate::Client::ask`] does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if it runs in an async runtime.
     pub fn ask<Q: QuestionSet, S: Serialize + ?Sized>(
         &self,
         question_set: Q,
@@ -35,6 +66,15 @@ impl Client {
             .block_on(self.client.ask(question_set, state))
     }
 
+    /// Asks a question set with this client, and returns a [`Receipt`] next to the answers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`AskError`] as [`crate::Client::ask`] does.
+    ///
+    /// # Panics
+    ///
+    /// Panics if it runs in an async runtime.
     pub fn ask_with_receipt<Q: QuestionSet, S: Serialize + ?Sized>(
         &self,
         question_set: Q,
@@ -45,6 +85,7 @@ impl Client {
             .block_on(self.client.ask_with_receipt(question_set, state))
     }
 
+    /// Returns the total of tokens of the client, its clones, and the client that it took.
     #[must_use]
     pub fn usage(&self) -> Usage {
         self.client.usage()

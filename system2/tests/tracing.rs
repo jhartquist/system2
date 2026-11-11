@@ -1,3 +1,5 @@
+//! Tests of the `tracing` span and events of a request.
+
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

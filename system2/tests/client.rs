@@ -1,3 +1,5 @@
+//! Tests of `Client` and its requests against a mock server.
+
 mod support;
 
 use serde_json::json;

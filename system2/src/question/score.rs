@@ -9,6 +9,91 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use system2_shared::score::{self, MAX_LEVELS};
 
+/// A question with an answer on a scale of levels.
+///
+/// The levels go from the lowest to the highest, and each one has a value of the type `L`. The API
+/// knows a level only by its text. The answer is a [`ScoreAnswer`], with the probability of each
+/// level, and it gives the values back. [`score!`](crate::score) makes a Score that the compiler
+/// checks. The constructors make one from data. A Score has 1 to 10 levels, and each level is
+/// different.
+///
+/// # Examples
+///
+/// The smallest Score has a list of levels, from the lowest to the highest. The answer gives a
+/// level back:
+///
+/// ```
+/// use system2::Score;
+///
+/// let urgency = Score::new(
+///     "How urgent is the ticket?",
+///     ["It can wait.", "It needs an answer today.", "It needs an answer now."],
+/// )?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// A level can be a value of the caller. A closure gives its text, and the answer gives the
+/// value back:
+///
+/// ```
+/// # use system2::Score;
+/// struct Deadline {
+///     level: String,
+///     hours: u32,
+/// }
+///
+/// let deadlines = vec![
+///     Deadline { level: "It can wait.".to_string(), hours: 72 },
+///     Deadline { level: "It needs an answer now.".to_string(), hours: 1 },
+/// ];
+/// let urgency = Score::with_values("How urgent is the ticket?", &deadlines, |deadline| {
+///     &deadline.level
+/// })?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// An enum that derives [`Levels`] gives its variants as the levels:
+///
+/// ```
+/// use system2::Levels;
+/// # use system2::Score;
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Levels)]
+/// enum Urgency {
+///     Low,
+///     Medium,
+///     High,
+/// }
+///
+/// let instructions = "How urgent is the ticket?".to_string();
+/// let urgency = Score::<Urgency>::of(instructions)?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// [`score!`](crate::score) takes the same forms, and the compiler checks them. A question with
+/// no variable can be a constant:
+///
+/// ```no_run
+/// use system2::prelude::*;
+/// use system2::Score;
+///
+/// #[derive(Debug, Clone, Copy, PartialEq, Levels)]
+/// enum Urgency {
+///     Low,
+///     Medium,
+///     High,
+/// }
+///
+/// const URGENCY: Score<Urgency> = score!("How urgent is the ticket?", Urgency);
+/// const SIZE: Score<&str> = score!("How big is the fix?", ["A line.", "A file.", "A module."]);
+/// const DAYS: Score<u32> = score!("How long does the fix take?", [("A day.", 1), ("A week.", 5)]);
+///
+/// # async fn run() -> system2::Result<()> {
+/// let urgency = URGENCY.ask("The site is down.").await?;
+/// if *urgency.most_likely() == Urgency::High || urgency.score() > 1.5 { /* … */ }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Score<L> {
     instructions: Json,
@@ -26,6 +111,10 @@ struct Entry<L> {
     value: L,
 }
 
+/// The levels of a [`Score`], from an enum.
+///
+/// Only [`derive(Levels)`](macro@crate::Levels) implements it. A caller names the trait in a
+/// bound, as in `L: Levels`. For levels that are not an enum, use [`Score::with_values`].
 #[diagnostic::on_unimplemented(
     message = "`{Self}` must derive `Levels` to give the levels of a Score",
     label = "does not derive `Levels`",
@@ -49,6 +138,18 @@ pub struct ScoreLevel<L> {
 }
 
 impl<L> Score<L> {
+    /// Makes a Score from levels that come from data, from the lowest to the highest.
+    ///
+    /// Each level is any `Serialize` value, and it follows the rules of the instructions. The
+    /// answer gives the level back.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidScore::Instructions`] if the instructions do not serialize, are empty, or are a
+    ///   bare number or `bool`.
+    /// - [`InvalidScore::Level`] if a level breaks a rule of the instructions.
+    /// - [`InvalidScore::Count`] if there are no levels, or more than 10.
+    /// - [`InvalidScore::Duplicate`] if two levels are the same.
     pub fn new(
         instructions: impl Serialize,
         levels: impl IntoIterator<Item = L>,
@@ -62,6 +163,19 @@ impl<L> Score<L> {
         Self::validated(instructions, levels)
     }
 
+    /// Makes a Score from the values of the caller, with a closure that gives their levels.
+    ///
+    /// The values go from the lowest level to the highest. Each level is any `Serialize` value, and
+    /// it follows the rules of the instructions. The values need no `Clone`, and the answer gives
+    /// a value back.
+    ///
+    /// # Errors
+    ///
+    /// - [`InvalidScore::Instructions`] if the instructions do not serialize, are empty, or are a
+    ///   bare number or `bool`.
+    /// - [`InvalidScore::Level`] if a level breaks a rule of the instructions.
+    /// - [`InvalidScore::Count`] if there are no values, or more than 10.
+    /// - [`InvalidScore::Duplicate`] if two levels are the same.
     pub fn with_values<D: Serialize>(
         instructions: impl Serialize,
         values: impl IntoIterator<Item = L>,
@@ -73,6 +187,15 @@ impl<L> Score<L> {
         Self::validated(instructions, levels)
     }
 
+    /// Makes a Score from instructions that come from data, with the levels of the type `L`.
+    ///
+    /// It validates the levels of `L` again, as [`Score::with_values`] does.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidScore::Instructions`] if the instructions do not serialize, are empty, or are a
+    /// bare number or `bool`. The derive of [`Levels`] validates the levels, so another variant
+    /// does not occur.
     pub fn of(instructions: impl Serialize) -> Result<Self, InvalidScore>
     where
         L: Levels,
@@ -83,10 +206,25 @@ impl<L> Score<L> {
         Self::validated(instructions, levels)
     }
 
+    /// Puts a tag next to the question, so that the answer comes back next to it.
+    ///
+    /// It is the same as [`Ask::tag`](crate::Ask::tag), but it is a `const fn`, so a constant can
+    /// hold a tagged question.
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
 
+    /// Builds the answer that a response with these values would give.
+    ///
+    /// `score` is the mean level, from 0 to the index of the last level, `confidence` is the
+    /// confidence of the API, and `probabilities` has one probability for each level, lowest
+    /// first. It's for tests of your own decision code, and it goes through the same checks as a
+    /// response from the API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidAnswer`] if the score is not from 0 to the index of the last level, if
+    /// there is not one probability for each level, or if another value is not from 0 to 1.
     pub fn answer(
         self,
         score: f64,
@@ -201,19 +339,40 @@ impl<L> QuestionSet for Score<L> {
     type AnswerSet = ScoreAnswer<L>;
 }
 
+/// An error of a constructor of [`Score`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidScore {
+    /// The instructions are not valid.
     #[error("the instructions {0}")]
     Instructions(InvalidJson),
+    /// A level is not valid.
     #[error("the level at index {index} {error}")]
-    Level { index: usize, error: InvalidJson },
+    Level {
+        /// The index of the level, from 0.
+        index: usize,
+        /// The rule that the level breaks.
+        error: InvalidJson,
+    },
+    /// The Score has no levels, or more than 10. The value is the number of levels.
     #[error("{}", score::count_message(*.0))]
     Count(usize),
+    /// Two levels are the same.
     #[error("{}", score::duplicate_message(*.first, *.second))]
-    Duplicate { first: usize, second: usize },
+    Duplicate {
+        /// The index of the first level, from 0.
+        first: usize,
+        /// The index of the second level, from 0.
+        second: usize,
+    },
 }
 
+/// The answer to a [`Score`]: the score, and the probability of each level.
+///
+/// Each method that gives probabilities gives pairs of a value and its probability. A method
+/// that borrows gives `(&L, f64)`, and a method that consumes the answer gives `(L, f64)`. It
+/// serializes as `{"score": s, "most_likely": level, "confidence": c, "levels": [level, …],
+/// "probabilities": [p, …]}`, so a value needs no `Serialize`.
 #[derive(Debug, Clone)]
 pub struct ScoreAnswer<L> {
     question: Score<L>,
@@ -224,37 +383,48 @@ pub struct ScoreAnswer<L> {
 }
 
 impl<L> ScoreAnswer<L> {
+    /// Returns the question of the answer.
     #[must_use]
     pub fn question(&self) -> &Score<L> {
         &self.question
     }
 
+    /// Returns the question of the answer, with its values, so that code can ask it again.
     #[must_use]
     pub fn into_question(self) -> Score<L> {
         self.question
     }
 
+    /// Returns the mean level, from 0 for the lowest level, as the API gives it.
     #[must_use]
     pub fn score(&self) -> f64 {
         self.score
     }
 
+    /// Returns the value of the level with the highest probability.
+    ///
+    /// If two levels have equal probabilities, it is the lower level.
     #[must_use]
     pub fn most_likely(&self) -> &L {
         &self.question.levels.as_entries()[self.most_likely].value
     }
 
+    /// Returns the value of the level with the highest probability, owned.
+    ///
+    /// If two levels have equal probabilities, it is the lower level.
     #[must_use]
     pub fn into_most_likely(self) -> L {
         let mut levels = self.question.levels.into_entries();
         levels.swap_remove(self.most_likely).value
     }
 
+    /// Returns the confidence of the API in the score, from 0 to 1.
     #[must_use]
     pub fn confidence(&self) -> f64 {
         self.confidence
     }
 
+    /// Returns each level and its probability, from the lowest level.
     pub fn probabilities(&self) -> impl ExactSizeIterator<Item = (&L, f64)> {
         self.question
             .levels
@@ -264,6 +434,7 @@ impl<L> ScoreAnswer<L> {
             .map(|(level, &probability)| (&level.value, probability))
     }
 
+    /// Returns each level and its probability, owned, from the lowest level.
     #[must_use]
     pub fn into_probabilities(self) -> Vec<(L, f64)> {
         self.question

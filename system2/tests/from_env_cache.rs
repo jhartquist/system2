@@ -1,3 +1,5 @@
+//! Tests of `Client::from_env` with a cache file and offline mode.
+
 mod support;
 
 use std::{env, fs};

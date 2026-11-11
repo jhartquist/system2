@@ -1,3 +1,5 @@
+//! Tests of the limit on requests at the same time.
+
 mod support;
 
 use std::time::Duration;

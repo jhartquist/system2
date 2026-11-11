@@ -4,22 +4,98 @@ use crate::{Image, InvalidAnswer, InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 
+/// A question that finds a region in an image: a bounding box.
+///
+/// The instructions describe one region of an image in the state. A Bbox needs the model
+/// `jev-1.14.0` or a later version. Its answer is a [`BboxAnswer`], with the edges of the region.
+/// [`bbox!`](crate::bbox) makes a Bbox that the compiler checks. [`Bbox::new`] makes one from
+/// data.
+///
+/// # Examples
+///
+/// The smallest Bbox has instructions of text:
+///
+/// ```
+/// use system2::Bbox;
+///
+/// let dialog = Bbox::new("The error dialog.")?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// The text can come from data:
+///
+/// ```
+/// # use system2::Bbox;
+/// let button = "Retry".to_string();
+/// let found = Bbox::new(format!("The button with the text `{button}`."))?;
+/// # Ok::<(), system2::Error>(())
+/// ```
+///
+/// [`bbox!`](crate::bbox) takes the same forms, and the compiler checks them. A question with no
+/// variable can be a constant:
+///
+/// ```
+/// use system2::prelude::*;
+/// # use system2::Bbox;
+///
+/// const DIALOG: Bbox = bbox!("The error dialog.");
+///
+/// let button = "Retry";
+/// let found = bbox!("The button with the text `{button}`.");
+/// ```
+///
+/// The state holds the image. The answer gives the region, and `to_pixels` gives it in the pixels
+/// of the image:
+///
+/// ```no_run
+/// use system2::prelude::*;
+/// use system2::{Image, PixelBox};
+///
+/// # async fn run(bytes: Vec<u8>) -> system2::Result<()> {
+/// let screenshot = Image::new(bytes)?;
+/// let dialog = bbox!("The error dialog.").ask(&screenshot).await?;
+/// let PixelBox { left, top, .. } = dialog.to_pixels(&screenshot);
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Bbox {
     instructions: Json,
 }
 
 impl Bbox {
+    /// Makes a Bbox from instructions that come from data.
+    ///
+    /// The instructions are any `Serialize` value that serializes to text, an object, or an
+    /// array.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidBbox::Instructions`] if the instructions do not serialize, are empty, or are a
+    /// bare number or `bool`.
     pub fn new(instructions: impl Serialize) -> Result<Self, InvalidBbox> {
         let instructions = json::validate(instructions).map_err(InvalidBbox::Instructions)?;
         let instructions = Json::from(instructions);
         Ok(Bbox { instructions })
     }
 
+    /// Puts a tag next to the question, so that the answer comes back next to it.
+    ///
+    /// It is the same as [`Ask::tag`](crate::Ask::tag), but it is a `const fn`, so a constant can
+    /// hold a tagged question.
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
     }
 
+    /// Builds the answer that a response with these edges and this confidence would give.
+    ///
+    /// Each edge is a fraction of the image, from 0 to 1, from the top left. It's for tests of
+    /// your own decision code, and it goes through the same checks as a response from the API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidAnswer`] if a value is not from 0 to 1, or if the left edge is right of
+    /// the right edge, or the top edge below the bottom edge.
     pub fn answer(
         self,
         left: f64,
@@ -69,13 +145,20 @@ impl QuestionSet for Bbox {
     type AnswerSet = BboxAnswer;
 }
 
+/// An error of [`Bbox::new`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum InvalidBbox {
+    /// The instructions are not valid.
     #[error("the instructions {0}")]
     Instructions(InvalidJson),
 }
 
+/// The answer to a [`Bbox`]: the edges of the region, from 0 to 1.
+///
+/// Each edge is a fraction of the width or the height of the image, as the API gives it. The API
+/// rounds each edge to 0.01. It serializes as
+/// `{"left": l, "top": t, "right": r, "bottom": b, "confidence": c}`.
 #[derive(Debug, Clone)]
 pub struct BboxAnswer {
     question: Bbox,
@@ -87,41 +170,54 @@ pub struct BboxAnswer {
 }
 
 impl BboxAnswer {
+    /// Returns the question of the answer.
     #[must_use]
     pub fn question(&self) -> &Bbox {
         &self.question
     }
 
+    /// Returns the question of the answer, with its values, so that code can ask it again.
     #[must_use]
     pub fn into_question(self) -> Bbox {
         self.question
     }
 
+    /// Returns the left edge, from 0 to 1.
     #[must_use]
     pub fn left(&self) -> f64 {
         self.left
     }
 
+    /// Returns the top edge, from 0 to 1.
     #[must_use]
     pub fn top(&self) -> f64 {
         self.top
     }
 
+    /// Returns the right edge, from 0 to 1.
     #[must_use]
     pub fn right(&self) -> f64 {
         self.right
     }
 
+    /// Returns the bottom edge, from 0 to 1.
     #[must_use]
     pub fn bottom(&self) -> f64 {
         self.bottom
     }
 
+    /// Returns the confidence of the API in the region, from 0 to 1.
     #[must_use]
     pub fn confidence(&self) -> f64 {
         self.confidence
     }
 
+    /// Returns the region in the pixels of the original of `image`.
+    ///
+    /// `image` must be the image that the API saw. The original is the image that the caller
+    /// gave. Thus the region is correct also for a crop, and for an image that the `image` feature
+    /// scaled. Each edge rounds to the nearest pixel. `right` and `bottom` are the first pixels
+    /// after the region.
     #[must_use]
     pub fn to_pixels(&self, image: &Image) -> PixelBox {
         self.pixels_in(image.place())
@@ -165,11 +261,18 @@ impl Serialize for BboxAnswer {
     }
 }
 
+/// A region of an image, in pixels.
+///
+/// `right` and `bottom` are the first pixels after the region, so the width is `right - left`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PixelBox {
+    /// The first column of the region.
     pub left: u32,
+    /// The first row of the region.
     pub top: u32,
+    /// The first column after the region.
     pub right: u32,
+    /// The first row after the region.
     pub bottom: u32,
 }
 

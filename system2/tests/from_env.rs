@@ -1,3 +1,5 @@
+//! Tests of `Client::from_env` with blank variables.
+
 mod support;
 
 use std::env;

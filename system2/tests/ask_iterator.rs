@@ -1,3 +1,5 @@
+//! Tests of `ask` on an iterator of question sets.
+
 mod support;
 
 use support::{
