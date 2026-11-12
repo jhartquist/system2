@@ -128,7 +128,7 @@ pub(super) fn runtime() -> Runtime {
 
 #[cfg(test)]
 mod tests {
-    use super::Client;
+    use super::{Client, OwnedRuntime, runtime};
 
     #[test]
     fn debug_shows_the_client_that_it_runs() {
@@ -141,5 +141,15 @@ mod tests {
             "{debug}"
         );
         assert!(debug.ends_with(", .. }, .. }"), "{debug}");
+    }
+
+    #[test]
+    fn drop_does_nothing_without_a_runtime() {
+        let handle = runtime().handle().clone();
+
+        drop(OwnedRuntime {
+            handle,
+            runtime: None,
+        });
     }
 }

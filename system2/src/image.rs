@@ -610,7 +610,9 @@ mod tests {
         .to_string();
         let question = r#"{"type":"noul","instructions":"s2-img-2222222222222222"}"#;
 
-        let found = references([state.as_str(), question, r#""no reference""#]);
+        let not_json = "s2-img-3333333333333333 is not json";
+
+        let found = references([state.as_str(), question, r#""no reference""#, not_json]);
 
         let expected = [first, second, "s2-img-2222222222222222"];
         assert_eq!(found, BTreeSet::from(expected.map(str::to_owned)));

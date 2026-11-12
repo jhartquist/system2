@@ -23,8 +23,9 @@ note: the method call chain might not have had the expected associated types
 note: required by a bound in `system2::AskIterator::ask`
  --> src/ask/question_set.rs
   |
+  | pub trait AskIterator: Iterator + Sized {
+...
   |     fn ask<S: Serialize + ?Sized>(self, state: &S) -> AskFuture<Vec<Self::Item>>
-  |        --- required by a bound in this associated function
   |     where
   |         Self::Item: QuestionSet,
   |                     ^^^^^^^^^^^ required by this bound in `AskIterator::ask`

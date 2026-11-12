@@ -322,8 +322,8 @@ impl<O> Choice<O> {
                 let description = json::validate_optional(option.description);
                 Entry::new(Cow::Borrowed(option.name), description, (option.value)())
             })
-            .collect::<Result<_, _>>()?;
-        Self::validated(instructions, options)
+            .collect::<Result<_, _>>();
+        Self::validated(instructions, options?)
     }
 
     /// Puts a tag next to the question, so that the answer comes back next to it.
@@ -883,6 +883,20 @@ mod tests {
     }
 
     #[test]
+    fn with_values_checks_each_description() {
+        let label = |skill: &(&'static str, &'static str)| *skill;
+
+        let choice = Choice::with_values("Which skill?", [("search", "Find a file.")], label);
+        let error = Choice::with_values("Which skill?", [("search", "")], label).unwrap_err();
+
+        assert!(choice.is_ok());
+        assert_eq!(
+            error.to_string(),
+            "the description of the option `search` must not be empty"
+        );
+    }
+
+    #[test]
     fn with_descriptions_refuses_bad_options() {
         let options = |names: &[&str]| -> Vec<(String, Value)> {
             names
@@ -936,7 +950,7 @@ mod tests {
         let errors = [
             Choice::new("", ["rust"]).unwrap_err(),
             Choice::with_descriptions(" ", [("rust", ())]).unwrap_err(),
-            Choice::with_values(json!({}), ["rust"], |name| *name).unwrap_err(),
+            Choice::with_values(json!({}), ["rust"], ToString::to_string).unwrap_err(),
             Choice::<Problem>::of(json!([])).unwrap_err(),
         ];
         for error in errors {

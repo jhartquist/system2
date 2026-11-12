@@ -9,3 +9,15 @@ help: consider using `const` instead of `let`
 4 -     let bytes = std::fs::read("logo.png").unwrap();
 4 +     const bytes: /* Type */ = std::fs::read("logo.png").unwrap();
   |
+
+error[E0435]: attempt to use a non-constant value in a constant
+ --> tests/ui/image_refuses_a_value_from_run_time.rs:5:21
+  |
+5 |     let _ = image!(&bytes);
+  |                     ^^^^^ non-constant value
+  |
+help: consider using `const` instead of `let`
+  |
+4 -     let bytes = std::fs::read("logo.png").unwrap();
+4 +     const bytes: usize = std::fs::read("logo.png").unwrap();
+  |
