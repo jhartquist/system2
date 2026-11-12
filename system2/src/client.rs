@@ -3,6 +3,8 @@ mod cache;
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet};
 use crate::image::{self, Bytes};
 use crate::{AskError, AskFuture, AskWithReceiptFuture, QuestionSet, Receipt, Usage, json};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use cache::{Cache, PendingLine};
 use reqwest::Url;
 use reqwest::header::{
@@ -19,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 use std::{env, fmt, future, iter};
+use system2_shared::image::PNG_SIGNATURE;
 use tokio::sync::Semaphore;
 use tracing::field::Empty;
 use tracing::{Instrument, Span, debug, info_span, trace, warn};
@@ -35,6 +38,8 @@ const LONGEST_BACKOFF: Duration = Duration::from_secs(5);
 const LONGEST_RETRY_AFTER: Duration = Duration::from_secs(30);
 const JITTER: f64 = 0.25;
 const REQUEST_ID: &str = "x-typesafe-request-id";
+const GENERATION_ID: &str = "x-generation-id";
+const OPENROUTER_HOST: &str = "openrouter.ai";
 const RETRY_AFTER_MS: &str = "retry-after-ms";
 const LONG_CONTEXT_HEADER: HeaderName =
     HeaderName::from_static("typesafe-danger-zone-long-context");
@@ -243,7 +248,7 @@ impl Client {
         let request_sha256 = cache::sha256(body.as_bytes());
         let span = info_span!(
             "ask",
-            gen_ai.provider.name = "typesafe",
+            gen_ai.provider.name = self.provider_name(),
             gen_ai.operation.name = "systemone",
             gen_ai.request.model = self.model,
             system2.question_count = raw_question_set.len(),
@@ -350,15 +355,14 @@ impl Client {
         has_bbox: bool,
     ) -> Result<(String, Option<String>, Duration), AskError> {
         let url = self.endpoint()?;
-
-        // the hash of the json, which no part of the body can hold
-        let boundary = (!images.is_empty()).then(|| hex::encode(request_sha256));
-        let headers = self.headers(boundary.as_deref(), has_bbox)?;
+        let openrouter = is_openrouter(&url);
+        let has_images = !images.is_empty();
+        let (body, boundary) = wire_body(body, images, request_sha256, openrouter)?;
+        let headers = self.headers(boundary.as_deref(), has_images || has_bbox)?;
         let bbox_model = has_bbox.then_some(self.model.as_str());
-        let body = match &boundary {
-            Some(boundary) => multipart(boundary, &body, images)?,
-            None => body.into_bytes(),
-        };
+
+        // openrouter turns on long context by itself
+        let long_context = self.long_context || openrouter;
 
         let body = match self.compression {
             Compression::None => body,
@@ -374,7 +378,9 @@ impl Client {
         loop {
             let attempt = retries + 1;
             let attempt_started = Instant::now();
-            let (status, result) = self.attempt(&url, &headers, &body, bbox_model).await;
+            let (status, result) = self
+                .attempt(&url, &headers, &body, long_context, bbox_model)
+                .await;
             let time_ms = millis(attempt_started.elapsed());
             let (error, wait) = match result {
                 Ok((text, request_id)) => {
@@ -420,6 +426,7 @@ impl Client {
         url: &Url,
         headers: &HeaderMap,
         body: &[u8],
+        long_context: bool,
         bbox_model: Option<&str>,
     ) -> (Option<u16>, Result<(String, Option<String>), Failure>) {
         let sent = self
@@ -433,7 +440,7 @@ impl Client {
         match sent {
             Ok(response) => (
                 Some(response.status().as_u16()),
-                read_success(response, self.long_context, bbox_model).await,
+                read_success(response, long_context, bbox_model).await,
             ),
             Err(error) => (None, Err(Failure::from_reqwest(error))),
         }
@@ -449,8 +456,8 @@ impl Client {
         self.usage.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    // a boundary for a multipart body, which a request with images has
-    fn headers(&self, boundary: Option<&str>, has_bbox: bool) -> Result<HeaderMap, AskError> {
+    // a boundary for a multipart body, which a request with images to typesafe has
+    fn headers(&self, boundary: Option<&str>, images_header: bool) -> Result<HeaderMap, AskError> {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, self.authorization()?);
 
@@ -460,7 +467,7 @@ impl Client {
         };
         headers.insert(CONTENT_TYPE, content_type);
 
-        if boundary.is_some() || has_bbox {
+        if images_header {
             headers.insert(IMAGES_HEADER, HeaderValue::from_static("true"));
         }
         if self.compression == Compression::Zstd {
@@ -495,6 +502,14 @@ impl Client {
             assets: Assets(references),
         })
         .expect("the body serializes")
+    }
+
+    // for tracing, so it stays typesafe for a base url that does not parse
+    fn provider_name(&self) -> &'static str {
+        match endpoint_for(&self.base_url) {
+            Some(url) if is_openrouter(&url) => "openrouter",
+            _ => "typesafe",
+        }
     }
 
     fn endpoint(&self) -> Result<Url, AskError> {
@@ -601,6 +616,51 @@ impl Serialize for Assets<'_> {
     }
 }
 
+// the body that `request_body` wrote, read again with raw values, so that it keeps its order
+#[derive(Deserialize, Serialize)]
+struct InlineRequestBody<'a> {
+    #[serde(borrow)]
+    model: &'a RawValue,
+    #[serde(borrow)]
+    state: &'a RawValue,
+    #[serde(borrow)]
+    questions: &'a RawValue,
+    #[serde(skip_deserializing)]
+    assets: InlineAssets<'a>,
+}
+
+// each image as base64, by its reference
+#[derive(Default)]
+struct InlineAssets<'a>(&'a [(String, Bytes)]);
+
+impl Serialize for InlineAssets<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Asset {
+            r#type: &'static str,
+            format: &'static str,
+            data_base64: String,
+        }
+        let assets = self.0.iter().map(|(reference, bytes)| {
+            let bytes = bytes.as_slice();
+
+            // `Image::new` takes only png and jpeg
+            let format = if bytes.starts_with(PNG_SIGNATURE) {
+                "png"
+            } else {
+                "jpeg"
+            };
+            let asset = Asset {
+                r#type: "image",
+                format,
+                data_base64: BASE64.encode(bytes),
+            };
+            (reference, asset)
+        });
+        serializer.collect_map(assets)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ResponseBody {
     model: Option<String>,
@@ -619,6 +679,25 @@ fn find_images(references: &BTreeSet<String>) -> Result<Vec<(String, Bytes)>, As
         .collect()
 }
 
+// the body, and the boundary if it is multipart. openrouter refuses a multipart body, so its
+// images go in the json. the boundary is the hash of the json, which no part can hold
+fn wire_body(
+    json: String,
+    images: &[(String, Bytes)],
+    request_sha256: [u8; 32],
+    openrouter: bool,
+) -> Result<(Vec<u8>, Option<String>), AskError> {
+    if images.is_empty() {
+        return Ok((json.into_bytes(), None));
+    }
+    if openrouter {
+        return Ok((inline(&json, images)?, None));
+    }
+    let boundary = hex::encode(request_sha256);
+    let body = multipart(&boundary, &json, images)?;
+    Ok((body, Some(boundary)))
+}
+
 #[expect(clippy::expect_used, reason = "a boundary is hex digits")]
 fn content_type_for(boundary: &str) -> HeaderValue {
     HeaderValue::try_from(format!("multipart/form-data; boundary={boundary}"))
@@ -627,10 +706,7 @@ fn content_type_for(boundary: &str) -> HeaderValue {
 
 // by hand, as reqwest sends a form as a stream, and zstd compresses the whole body
 fn multipart(boundary: &str, json: &str, images: &[(String, Bytes)]) -> Result<Vec<u8>, AskError> {
-    let size = images.iter().map(|(_, bytes)| bytes.as_slice().len()).sum();
-    if size > MAX_IMAGE_BYTES {
-        return Err(AskError::ByteLimit { size });
-    }
+    check_image_size(images)?;
 
     let mut body = Vec::new();
     let request_headers =
@@ -646,6 +722,27 @@ fn multipart(boundary: &str, json: &str, images: &[(String, Bytes)]) -> Result<V
 
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     Ok(body)
+}
+
+// the json with each image in `assets` as base64
+#[expect(
+    clippy::expect_used,
+    reason = "the client wrote the json, and an image serializes"
+)]
+fn inline(json: &str, images: &[(String, Bytes)]) -> Result<Vec<u8>, AskError> {
+    check_image_size(images)?;
+
+    let mut body: InlineRequestBody = serde_json::from_str(json).expect("the json is a request");
+    body.assets = InlineAssets(images);
+    Ok(serde_json::to_vec(&body).expect("the body serializes"))
+}
+
+fn check_image_size(images: &[(String, Bytes)]) -> Result<(), AskError> {
+    let size = images.iter().map(|(_, bytes)| bytes.as_slice().len()).sum();
+    if size > MAX_IMAGE_BYTES {
+        return Err(AskError::ByteLimit { size });
+    }
+    Ok(())
 }
 
 fn add_part(body: &mut Vec<u8>, boundary: &str, headers: &str, content: &[u8]) {
@@ -682,6 +779,10 @@ fn endpoint_for(base_url: &str) -> Option<Url> {
     Some(url)
 }
 
+fn is_openrouter(url: &Url) -> bool {
+    url.host_str() == Some(OPENROUTER_HOST)
+}
+
 // the text and the request ID of a response with a success status
 async fn read_success(
     response: reqwest::Response,
@@ -711,9 +812,12 @@ async fn read_success(
     }
 }
 
+// openrouter names a request by its generation
 fn request_id(headers: &HeaderMap) -> Option<String> {
-    let id = headers.get(REQUEST_ID)?.to_str().ok()?;
-    Some(id.to_owned())
+    let id = headers
+        .get(REQUEST_ID)
+        .or_else(|| headers.get(GENERATION_ID))?;
+    Some(id.to_str().ok()?.to_owned())
 }
 
 fn parse_json(text: &str, request_id: Option<&str>) -> Result<Value, AskError> {
@@ -840,8 +944,9 @@ impl fmt::Debug for Client {
 #[cfg(test)]
 mod tests {
     use super::{
-        BTreeSet, Bytes, Client, Compression, REQUEST_ID, ResponseBody, backoff, jitter, multipart,
-        parse_json, read_response, read_usage, request_id, retry_after, retry_wait,
+        BTreeSet, Bytes, Client, Compression, GENERATION_ID, REQUEST_ID, ResponseBody, backoff,
+        check_image_size, inline, jitter, multipart, parse_json, read_response, read_usage,
+        request_id, retry_after, retry_wait, wire_body,
     };
     use crate::AskError;
     use crate::ask::wire::RawQuestionSet;
@@ -966,7 +1071,54 @@ mod tests {
     }
 
     #[test]
-    fn multipart_refuses_images_over_32_mib() {
+    fn inline_puts_each_image_in_the_json_as_base64() {
+        let images = [
+            (
+                "s2-img-0123456789abcdef".to_owned(),
+                Bytes::Static(b"\x89PNG\r\n\x1a\n"),
+            ),
+            (
+                "s2-img-fedcba9876543210".to_owned(),
+                Bytes::Static(b"\xFF\xD8"),
+            ),
+        ];
+        let json = r#"{"model":"jev-latest","state":"s2-img-0123456789abcdef","questions":{"q0":{"type":"choice","criteria":{"b":null,"a":null}}},"assets":{"s2-img-0123456789abcdef":{"part":"s2-img-0123456789abcdef"}}}"#;
+
+        let body = inline(json, &images).unwrap();
+
+        let expected = r#"{"model":"jev-latest","state":"s2-img-0123456789abcdef","questions":{"q0":{"type":"choice","criteria":{"b":null,"a":null}}},"assets":{"s2-img-0123456789abcdef":{"type":"image","format":"png","data_base64":"iVBORw0KGgo="},"s2-img-fedcba9876543210":{"type":"image","format":"jpeg","data_base64":"/9g="}}}"#;
+        assert_eq!(String::from_utf8(body).unwrap(), expected);
+    }
+
+    #[test]
+    fn wire_body_puts_images_in_parts_except_for_openrouter() {
+        let json = r#"{"model":"jev-latest","state":"s2-img-0123456789abcdef","questions":{}}"#;
+        let images = [(
+            "s2-img-0123456789abcdef".to_owned(),
+            Bytes::Static(b"\xFF\xD8"),
+        )];
+        let request_sha256 = [0xAB; 32];
+        let boundary = hex::encode(request_sha256);
+        let cases = [
+            (&images[..0], false, json.as_bytes().to_vec(), None),
+            (&images[..0], true, json.as_bytes().to_vec(), None),
+            (
+                &images[..],
+                false,
+                multipart(&boundary, json, &images).unwrap(),
+                Some(boundary.clone()),
+            ),
+            (&images[..], true, inline(json, &images).unwrap(), None),
+        ];
+        for (images, openrouter, body, boundary) in cases {
+            let wire = wire_body(json.to_owned(), images, request_sha256, openrouter).unwrap();
+
+            assert_eq!(wire, (body, boundary), "{openrouter} {}", images.len());
+        }
+    }
+
+    #[test]
+    fn check_image_size_refuses_images_over_32_mib() {
         let bytes: &'static [u8] = vec![0; 16 * 1024 * 1024 + 1].leak();
         let images = [
             ("s2-img-0123456789abcdef".to_owned(), Bytes::Static(bytes)),
@@ -976,32 +1128,65 @@ mod tests {
             ),
         ];
 
-        let error = multipart("b0", "{}", &images).unwrap_err();
+        let error = check_image_size(&images).unwrap_err();
 
         assert!(matches!(error, AskError::ByteLimit { size: 33_554_433 }));
         let at_the_limit = [images[1].clone(), images[1].clone()];
-        assert!(multipart("b0", "{}", &at_the_limit).is_ok());
+        assert!(check_image_size(&at_the_limit).is_ok());
+
+        // each body checks the size before it copies the images
+        let multipart = multipart("b0", "{}", &images);
+        assert!(matches!(multipart, Err(AskError::ByteLimit { .. })));
+        let inline = inline("{}", &images);
+        assert!(matches!(inline, Err(AskError::ByteLimit { .. })));
     }
 
     #[test]
-    fn request_id_reads_the_header() {
+    fn request_id_reads_the_header_of_typesafe_or_openrouter() {
+        let typesafe = HeaderValue::from_static("req_01a13d1fbca4728f8f7c1cdd312bd3a5");
+        let openrouter = HeaderValue::from_static("gen-dec-1794416423-QfGOKC8K4pTO9QokaVHK");
         let cases = [
             (
-                Some(HeaderValue::from_static(
-                    "req_01a13d1fbca4728f8f7c1cdd312bd3a5",
-                )),
+                vec![(REQUEST_ID, typesafe.clone())],
                 Some("req_01a13d1fbca4728f8f7c1cdd312bd3a5"),
             ),
-            (None, None),
-            (Some(HeaderValue::from_bytes(b"req_\xff").unwrap()), None),
+            (
+                vec![(GENERATION_ID, openrouter.clone())],
+                Some("gen-dec-1794416423-QfGOKC8K4pTO9QokaVHK"),
+            ),
+            (
+                vec![(GENERATION_ID, openrouter), (REQUEST_ID, typesafe)],
+                Some("req_01a13d1fbca4728f8f7c1cdd312bd3a5"),
+            ),
+            (vec![], None),
+            (
+                vec![(REQUEST_ID, HeaderValue::from_bytes(b"req_\xff").unwrap())],
+                None,
+            ),
         ];
-        for (value, expected) in cases {
+        for (values, expected) in cases {
             let mut headers = HeaderMap::new();
-            if let Some(value) = value {
-                headers.insert(REQUEST_ID, value);
+            for (name, value) in values {
+                headers.insert(name, value);
             }
 
             assert_eq!(request_id(&headers).as_deref(), expected);
+        }
+    }
+
+    #[test]
+    fn provider_name_names_openrouter_by_its_host() {
+        let cases = [
+            ("https://api.typesafe.ai", "typesafe"),
+            ("https://openrouter.ai/api", "openrouter"),
+            ("https://openrouter.ai.example.com/api", "typesafe"),
+            ("http://127.0.0.1:8080", "typesafe"),
+            ("openrouter.ai", "typesafe"),
+        ];
+        for (base_url, expected) in cases {
+            let client = Client::new().base_url(base_url);
+
+            assert_eq!(client.provider_name(), expected, "{base_url}");
         }
     }
 

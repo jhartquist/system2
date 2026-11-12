@@ -38,7 +38,7 @@ pub enum AskError {
     MissingImage { reference: String },
     #[error(
         "the model of a Bbox must be `jev-1.14.0` or a later version, not `{model}`: \
-         call `Client::model(\"jev-1.14.0\")`"
+         call `Client::model(\"jev-latest\")`"
     )]
     BboxModel { model: String },
     #[error("the response must arrive within the timeout: raise it with `Client::timeout`")]
@@ -71,12 +71,13 @@ impl AskError {
         long_context: bool,
         bbox_model: Option<&str>,
     ) -> Self {
-        let response: Value = serde_json::from_str(body).unwrap_or_default();
+        let response = typesafe_response(body);
         let detail = &response["detail"];
         if detail["error_type"] == TOKEN_LIMIT {
             return AskError::TokenLimit { long_context };
         }
-        let message = api_message(detail);
+        let openrouter_message = response["error"]["message"].as_str().map(str::to_owned);
+        let message = api_message(detail).or(openrouter_message);
 
         // the api refuses a bbox on a model before `jev-1.14.0` with only this message
         if let Some(model) = bbox_model
@@ -111,6 +112,17 @@ impl AskError {
             EnvError::Cache(error) => AskError::Cache(error),
         }
     }
+}
+
+// openrouter puts the body of typesafe in its own error as text, as in `HTTP 400: {…}`
+fn typesafe_response(body: &str) -> Value {
+    let response: Value = serde_json::from_str(body).unwrap_or_default();
+    let wrapped = response["error"]["message"]
+        .as_str()
+        .and_then(|message| message.strip_prefix("HTTP "))
+        .and_then(|message| message.split_once(": "))
+        .and_then(|(_, body)| serde_json::from_str(body).ok());
+    wrapped.unwrap_or(response)
 }
 
 fn api_message(detail: &Value) -> Option<String> {
@@ -244,7 +256,7 @@ mod tests {
                 assert_eq!(
                     error.to_string(),
                     "the model of a Bbox must be `jev-1.14.0` or a later version, \
-                     not `jev-1.13.0`: call `Client::model(\"jev-1.14.0\")`"
+                     not `jev-1.13.0`: call `Client::model(\"jev-latest\")`"
                 );
             } else {
                 assert!(
@@ -252,6 +264,43 @@ mod tests {
                     "{code} {body} {error:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn from_status_reads_the_error_of_openrouter() {
+        let unknown_model =
+            r#"{"error":{"message":"Model typesafe/jev-1.14.0 does not exist","code":400}}"#;
+        let noul = r#"{"error":{"message":"HTTP 400: {\"detail\":\"Noul question must have criteria or instructions: q0\"}","code":400}}"#;
+        let token_limit = r#"{"error":{"message":"HTTP 400: {\"detail\":{\"error_type\":\"max_tokens_exceeded\"}}","code":400}}"#;
+        let bbox_model = r#"{"error":{"message":"HTTP 400: {\"detail\":{\"error_type\":\"api_usage_error\",\"message\":\"Invalid request.\"}}","code":400}}"#;
+        let cases = [
+            (
+                unknown_model,
+                "the API refused the request with status 400: \
+                 Model typesafe/jev-1.14.0 does not exist",
+            ),
+            (
+                noul,
+                "the API refused the request with status 400: \
+                 Noul question must have criteria or instructions: q0",
+            ),
+            (
+                token_limit,
+                "the request has too many tokens for long context: \
+                 make the state smaller, or split the questions into many requests",
+            ),
+            (
+                bbox_model,
+                "the model of a Bbox must be `jev-1.14.0` or a later version, \
+                 not `jev-1.13`: call `Client::model(\"jev-latest\")`",
+            ),
+        ];
+        for (body, expected) in cases {
+            let error =
+                AskError::from_status(StatusCode::BAD_REQUEST, body, None, true, Some("jev-1.13"));
+
+            assert_eq!(error.to_string(), expected, "{body}");
         }
     }
 

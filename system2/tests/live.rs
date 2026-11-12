@@ -1,5 +1,6 @@
 // the answers replay offline from `live.jsonl`. to record them again, delete the file and run
-// `SYSTEM2_RECORD=1 cargo test --test live -- --include-ignored` with `TYPESAFE_API_KEY`
+// `SYSTEM2_RECORD=1 cargo test --test live -- --include-ignored` with `TYPESAFE_API_KEY`. the
+// tests of openrouter need `OPENROUTER_API_KEY`
 
 use serde::Serialize;
 use serde_json::json;
@@ -320,5 +321,97 @@ async fn ask_reports_an_unknown_model() {
         panic!("{error:?}");
     };
     assert_eq!((status, message.as_str()), (400, "Unknown model: jev-1.14"));
+    assert!(request_id.is_some());
+}
+
+// openrouter takes its own key and model names, and no multipart body
+fn openrouter() -> Client {
+    let api_key = env::var("OPENROUTER_API_KEY").unwrap_or_default();
+    Client::new()
+        .base_url("https://openrouter.ai/api")
+        .api_key(api_key)
+}
+
+#[tokio::test]
+#[ignore = "needs OPENROUTER_API_KEY"]
+async fn ask_answers_through_openrouter_with_a_receipt() {
+    let (spam, receipt) = openrouter()
+        .ask_with_receipt(noul!("Is this message spam?"), "Buy now!")
+        .await
+        .unwrap();
+
+    assert!(spam.is_likely());
+    let model = receipt.model.unwrap();
+    assert!(model.starts_with("typesafe/jev-1."), "{model}");
+    assert!(receipt.usage.input_tokens > 259, "{:?}", receipt.usage);
+    let request_id = receipt.request_id.unwrap();
+    assert!(request_id.starts_with("gen-"), "{request_id}");
+}
+
+#[tokio::test]
+#[ignore = "needs OPENROUTER_API_KEY"]
+async fn ask_sends_an_image_to_openrouter_in_the_json() {
+    let square = openrouter()
+        .ask(bbox!("The black square."), &SQUARE)
+        .await
+        .unwrap();
+
+    assert_near_the_square(square.to_pixels(&SQUARE), PATCH);
+}
+
+#[tokio::test]
+#[ignore = "needs OPENROUTER_API_KEY"]
+async fn ask_reports_the_token_limit_of_openrouter() {
+    // openrouter always has long context
+    let state = "word ".repeat(270_000);
+
+    let error = openrouter()
+        .ask(noul!("Is the text long?"), &state)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(error, AskError::TokenLimit { long_context: true }),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs OPENROUTER_API_KEY"]
+async fn ask_reports_a_bbox_on_an_older_model_of_openrouter() {
+    let error = openrouter()
+        .model("jev-1.13")
+        .ask(bbox!("The black square."), &SQUARE)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&error, AskError::BboxModel { model } if model == "jev-1.13"),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs OPENROUTER_API_KEY"]
+async fn ask_reports_an_unknown_model_of_openrouter() {
+    // the pinned names of typesafe have a patch number, and those of openrouter do not
+    let error = openrouter()
+        .model("jev-1.14.0")
+        .ask(noul!("Is this message spam?"), "Buy now!")
+        .await
+        .unwrap_err();
+
+    let AskError::Http {
+        status,
+        message,
+        request_id,
+    } = error
+    else {
+        panic!("{error:?}");
+    };
+    assert_eq!(
+        (status, message.as_str()),
+        (400, "Model typesafe/jev-1.14.0 does not exist")
+    );
     assert!(request_id.is_some());
 }

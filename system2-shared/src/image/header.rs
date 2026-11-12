@@ -5,7 +5,7 @@ pub(crate) const MIN_SIDE: u32 = 280;
 pub(crate) const MAX_SIDE: u32 = 1568;
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 
-const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+pub const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 // the signature, then the length, the type, the 13 bytes of data, and the crc of the header chunk
 const PNG_HEADER_LENGTH: u32 = 13;
