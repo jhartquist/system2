@@ -14,8 +14,6 @@ Daniel Kahneman's *Thinking, Fast and Slow* popularized two modes of thinking:
 >
 > \- [Diogo Almeida](https://x.com/CompleteSkeptic/status/2099981459541143995), CEO of TypeSafe
 
-`system2` is not affiliated with or endorsed by TypeSafe.
-
 TypeSafe calls Jev a [System One](https://docs.typesafe.ai/concepts/system-one) model: it answers
 narrow questions about an input, called the `state`. Unlike an LLM asked for structured output, Jev
 doesn't generate text or produce any chain-of-thought: it answers with calibrated probabilities.
@@ -37,7 +35,7 @@ with code.
   and request ID.
 - **Resilient**: retries with backoff, timeouts, and a concurrency limit built in.
 
-## Getting started
+## Install
 
 [Sign up](https://console.typesafe.ai/home) for TypeSafe, create an
 [API key](https://console.typesafe.ai/keys), then:
@@ -50,7 +48,7 @@ export TYPESAFE_API_KEY=...
 
 `system2` is young, so expect breaking changes before 1.0.
 
-## Example
+## Quick start
 
 Jev has four kinds of question: a [`noul`][Noul] asks yes or no, a [`choice`][Choice] picks one
 of your options, a [`score`][Score] picks a level on your ordered scale, and a [`bbox`][Bbox] finds
