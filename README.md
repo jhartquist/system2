@@ -1,26 +1,27 @@
 # system2
 
-[![crates.io](https://img.shields.io/crates/v/system2.svg)](https://crates.io/crates/system2)
-[![docs.rs](https://img.shields.io/docsrs/system2)](https://docs.rs/system2)
-[![CI](https://github.com/jhartquist/system2/actions/workflows/ci.yml/badge.svg)](https://github.com/jhartquist/system2/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/system2.svg)](https://crates.io/crates/system2) [![docs.rs](https://img.shields.io/docsrs/system2)](https://docs.rs/system2) [![CI](https://github.com/jhartquist/system2/actions/workflows/ci.yml/badge.svg)](https://github.com/jhartquist/system2/actions/workflows/ci.yml)
 
-An unofficial, idiomatic Rust SDK for [TypeSafe](https://typesafe.ai/)'s System One model,
+An (unofficial) idiomatic Rust SDK for [TypeSafe](https://typesafe.ai/)'s System One model,
 [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
-
-> the goal is to make System 1 tasks extremely reliable and get System 2 by composing with code
->
-> \- [Diogo Almeida](https://x.com/CompleteSkeptic/status/2099981459541143995), CEO of TypeSafe
 
 Daniel Kahneman's *Thinking, Fast and Slow* popularized two modes of thinking:
 
 - **System 1** makes quick, intuitive judgments.
 - **System 2** reasons slowly and deliberately.
 
+> the goal is to make System 1 tasks extremely reliable and get System 2 by composing with code
+>
+> \- [Diogo Almeida](https://x.com/CompleteSkeptic/status/2099981459541143995), CEO of TypeSafe
+
+`system2` is not affiliated with or endorsed by TypeSafe.
+
 TypeSafe calls Jev a [System One](https://docs.typesafe.ai/concepts/system-one) model: it answers
-narrow questions about an input, called the `state`, with calibrated probabilities. `system2`
-brings those judgments into Rust. A question or a state can be as simple as a string, or it can
-be built from your own enums and structs, and even images. Either way, an answer hands back the
-values you passed in, with probabilities and confidence, so you can compose them into decisions
+narrow questions about an input, called the `state`. Unlike an LLM asked for structured output, Jev
+doesn't generate text or produce any chain-of-thought: it answers with calibrated probabilities.
+`system2` brings those judgments into Rust. A question or a state can be as simple as a string, or
+it can be built from your own enums and structs, and even images. Either way, an answer hands back
+the values you passed in, with their probabilities, so you can compose them into decisions
 with code.
 
 ## Why system2
@@ -34,7 +35,7 @@ with code.
 - **Testable**: cache and replay recorded answers, and unit test your decisions with no network.
 - **Observable**: OpenTelemetry-compatible `tracing` spans with latency, tokens, model, retries,
   and request ID.
-- **Reliable**: retries, timeouts, and a concurrency limit built in.
+- **Resilient**: retries with backoff, timeouts, and a concurrency limit built in.
 
 ## Getting started
 
@@ -51,8 +52,10 @@ export TYPESAFE_API_KEY=...
 
 ## Example
 
-A [`noul`][Noul] is Jev's yes-or-no question, and its answer is the probability of yes. This
-example asks two questions in one request, then decides based on their probabilities:
+Jev has four kinds of question: a [`noul`][Noul] asks yes or no, a [`choice`][Choice] picks one
+of your options, a [`score`][Score] picks a level on your ordered scale, and a [`bbox`][Bbox] finds
+a region of an image. This example asks two nouls in one request, then decides based on the
+probability of yes:
 
 ```rust,no_run
 use system2::prelude::*;
@@ -79,22 +82,28 @@ async fn main() -> system2::Result<()> {
 }
 ```
 
-Jev answered 0.85 for angry and 0.67 for the refund, so this prints `send to a person`.
+Jev answered 0.67 for the refund, under the 0.9 the code wants, and 0.85 for angry, over 0.8, so
+this prints `send to a person`.
 
 [`.ask`][Ask::ask] takes any question or set of questions, and a state, and returns the answers in
 the shape of the questions. There is no client to set up. The first `.ask` makes a global client
-from `TYPESAFE_API_KEY`, and every later `.ask` shares it.
+from `TYPESAFE_API_KEY`, and every later `.ask` shares it. `.ask` consumes a set, so clone a
+question to ask it again.
+
+The prelude has the macros and the traits. The snippets below continue this example. Import each
+type they use by name, as in `use system2::Noul;`.
 
 ## Questions and state
 
-A question and a state can each be any `serde::Serialize` value. A state must serialize to text,
-an object, or an array, and an empty one fails before any request is sent. Here the question
+A question and a state can each be any `serde::Serialize` value. Each must serialize to text, an
+object, or an array, and an empty one fails before any request is sent. Here the question
 carries a struct of your own, and the state is JSON. Add serde with
 `cargo add serde --features derive` and `cargo add serde_json`:
 
 ```rust,ignore
 use serde::Serialize;
 use serde_json::json;
+use system2::Noul;
 
 #[derive(Serialize)]
 struct Policy {
@@ -202,7 +211,8 @@ const DAYS: Choice<u32> = choice!(
 ```
 
 For values from data, [`Choice::with_values`][Choice::with_values] takes your values and a closure
-that names each one. The answer hands back the value Jev picked, with no lookup:
+that gives each one its name, or its name and a description. The answer hands back the value Jev
+picked, with no lookup:
 
 ```rust,ignore
 #[derive(Deserialize)]
@@ -221,14 +231,14 @@ let owner = Choice::with_values("Who should answer this ticket?", people, |perso
 let person: Person = owner.into_most_likely();
 ```
 
-An [`Image`][Image] goes anywhere text does: in a placeholder, in `json!`, in a struct, or as an
-option. Here a customer sends a screenshot, and the code compares it to a picture of a known bug
-that ships with the app:
+An [`Image`][Image] goes anywhere text does: in a `{placeholder}` of a question, in `json!`, in a
+struct, or as an option. Here a customer sends a screenshot, and the code compares it to a picture
+of a known bug that ships with the app:
 
 ```rust,ignore
 const KNOWN_BUG: Image = image!("known_bug.png");
 
-let screenshot = Image::new(std::fs::read("screenshot.png")?)?;
+let screenshot = Image::new(bytes)?; // the bytes of the customer's upload
 
 let same = noul!("Does {screenshot} show the same error as {KNOWN_BUG}?")
     .ask("The app shows this error when I pay.")
@@ -254,7 +264,7 @@ Each question type has two ways in. A constructor, such as [`Noul::new`][Noul::n
 checked by the compiler, so it gives you a `Noul` with nothing to unwrap. It can still take
 run-time values in its placeholders, as in `noul!("Is the ticket about {product}?")`, because the
 text around them already proves the question valid. Anything the compiler cannot see, such as a
-whole question, its options, or its levels from data, goes through a constructor.
+whole question or the options of a Choice from data, goes through a constructor.
 
 A mistake in a macro is a compile error at the bad token:
 
@@ -286,8 +296,13 @@ a wrong judgment, which is why every answer carries its probabilities.
 
 ## Question sets
 
-A tuple, an array, or a `Vec` of questions is a set, and one request asks the whole set. The
-first example was a tuple of two questions. Sets nest, so a tuple can hold a `Vec` with one
+A set is a group of questions that one request asks. There are three ways to build one:
+
+- A tuple, an array, or a `Vec` of questions. The answers come back in the same shape.
+- [`questions!`][questions!], which names each answer, inline.
+- `#[derive(Answers)]`, which names them in a struct of your own, to return from a function.
+
+The first example was a tuple of two questions. Sets nest, so a tuple can hold a `Vec` with one
 question for each item in your data:
 
 ```rust,ignore
@@ -309,14 +324,13 @@ The answers come back in the shape of the questions: `angry` is one answer, and 
 `Option` of a set asks it only when it is `Some`, as in `paid.then_some(REFUND)`. An iterator of
 questions has `.ask` too, and an empty set sends no request at all.
 
-When a set grows, give its answers names. [`questions!`][questions!] makes a struct with a field
-for each question. A [`score`][Score] puts the state on an ordered scale of your levels, lowest
-first. Jev knows a level only by its text, so each doc comment is the text of its level, and a
-variant with no doc comments uses its name. Ask three things about a ticket in one request, then
-decide:
+When a set grows, give its answers names with `questions!`. This one asks three things about a
+ticket in one request, then decides. The score's levels come from an enum, lowest first. Jev
+knows a level only by its text, so each doc comment is the text of its level, and an enum with
+no doc comments uses the names of its variants, such as `low`:
 
 ```rust,ignore
-#[derive(Debug, PartialEq, Levels)]
+#[derive(Debug, Levels)]
 enum Urgency { Low, Medium, High }
 
 let triage = questions! {
@@ -327,12 +341,12 @@ let triage = questions! {
 .ask(&ticket)
 .await?;
 
-let team = *triage.team.most_likely();
-let urgent = triage.urgency.probability_of(&Urgency::High) > 0.7;
+let (&team, team_probability) = triage.team.top(1).next().expect("a Choice has an option");
+let urgent = triage.urgency.score() >= 1.5;
 let angry = triage.angry.probability() > 0.8;
 
 // act only when Jev gives the team it picked at least 0.9
-let decision = if triage.team.probability() < 0.9 {
+let decision = if team_probability < 0.9 {
     "ask a person".to_string()
 } else if urgent || angry {
     format!("page the {team:?} lead")
@@ -341,13 +355,14 @@ let decision = if triage.team.probability() < 0.9 {
 };
 ```
 
-A score's answer also has `score()`, the mean level, from 0 to the index of the last level, and
-`most_likely()`, the level with the highest probability. Levels can be inline too, as text or
+`top(1)` gives the option Jev picked, with its probability. A score's `score()` is the mean
+level, from 0 to the index of the last level, so here it runs from 0 (low) to 2 (high), and
+`most_likely()` is the level with the highest probability. Levels can be inline too, as text or
 with your own values, as in `score!("How long is the fix?", [("A day.", 1), ("A week.", 5)])`.
 
-To return the answers from a function, give them a type of your own. `#[derive(Answers)]` names
-a question for each field, and [`Questions`][Questions] asks them. The return type picks the
-questions, so `Questions::new()` takes no argument:
+To return the answers from a function, put them in a struct of your own. `#[derive(Answers)]`
+takes a question for each field, and [`Questions::new()`][Questions] asks them all, knowing which
+from the return type:
 
 ```rust,ignore
 #[derive(Answers)]
@@ -367,17 +382,18 @@ async fn triage(ticket: &Ticket) -> system2::Result<Triage> {
 
 Five tickets, one request each:
 
-```text
-ticket 1: page the Billing lead      "We were charged twice this month. Please fix it today."
-ticket 2: add to the Support queue   "How do I change my avatar?"
-ticket 3: page the Engineering lead  "The export page has shown a 500 error since this morning..."
-ticket 4: add to the Support queue   "hello??"
-ticket 5: ask a person               "The invoice page crashes when I try to pay."
-```
+| Ticket | Message | Decision |
+| --- | --- | --- |
+| 1 | We were charged twice this month. Please fix it today. | page the Billing lead |
+| 2 | How do I change my avatar? | add to the Support queue |
+| 3 | The export page has shown a 500 error since this morning. Our whole team is blocked. | page the Engineering lead |
+| 4 | hello?? | add to the Support queue |
+| 5 | The invoice page crashes when I try to pay. | ask a person |
 
-Ticket 5 could be billing or engineering. Jev gave engineering 0.80 and billing 0.20, the code
-wants 0.90 before it acts, so a person gets it. Each number in that code is yours: the answers
-keep their probabilities, so every threshold stays in your code where you can see it.
+The full program is [`examples/triage`][triage], with the recording behind these numbers. Ticket 5
+could be billing or engineering. Jev gave engineering 0.80 and billing 0.20, the code wants 0.90
+before it acts, so a person gets it. Each number in that code is yours: the answers keep their
+probabilities, so every threshold stays in your code where you can see it.
 
 One answer can also pick the next question:
 
@@ -397,11 +413,12 @@ SYSTEM2_CACHE=triage.jsonl cargo run                     # asks Jev, and records
 SYSTEM2_CACHE=triage.jsonl SYSTEM2_OFFLINE=1 cargo run   # replays, sends nothing
 ```
 
-Change the team threshold from 0.9 to 0.8 and replay: ticket 5 pages the engineering lead.
-Change it back, and it goes to a person. Trying both cost zero requests. Offline, a request that
-changed since the recording (the question, the state, or the model) is an error, not a quiet call
-to the API. A replayed answer counts no tokens and has no request ID. The file holds each response
-and a hash of its request, not the request itself. Treat it like the rest of your test data.
+In `examples/triage`, change `TEAM_THRESHOLD` from 0.9 to 0.8 and replay: ticket 5 pages the
+engineering lead. Change it back, and it goes to a person. Trying both cost zero requests. Offline,
+a request that changed since the recording (the question, the state, or the model) is an error, not
+a quiet call to the API. A replayed answer counts no tokens and has no request ID. The file holds
+each response and a hash of its request, not the request itself. Treat it like the rest of your test
+data.
 
 The same file makes a test repeatable. Write the test as usual:
 
@@ -424,16 +441,25 @@ SYSTEM2_CACHE=tests/jev.jsonl SYSTEM2_OFFLINE=1 cargo test
 ```
 
 On a client of your own, `Client::from_env()?.cache("tests/jev.jsonl")?.offline(true)` does the
-same in code. Two live runs of one request can give different probabilities, and the cache is
-what makes them the same. A request matches only when its body matches byte for byte, so use a
+same in code. Two live runs of one request can give different probabilities: in the recordings
+behind this page, one ticket's urgency was 0.82 in one run and 0.83 in the next. The cache is
+what makes runs the same. A request matches only when its body matches byte for byte, so use a
 `BTreeMap`, not a `HashMap`, in a state: a `HashMap` writes its keys in a different order each
 run.
+
+### Choosing thresholds
 
 The right number is yours to find. TypeSafe trains Jev so that its probabilities are
 [calibrated](https://docs.typesafe.ai/concepts/system-one): across many answers, the stated
 probability should match how often such answers are right. It is no guarantee about any one
-answer, and the numbers on this page are examples, not advice. Pick yours on tickets you have
-already labelled, and weigh what each kind of mistake costs you.
+answer, and the numbers on this page are examples, not advice.
+
+1. Pin the model with `.model("jev-1.14.0")`, so the answers do not move while you choose.
+2. Record the answers for tickets you have already labelled.
+3. Replay them at each candidate threshold, and count each kind of mistake. A replay costs no
+   requests, so trying many thresholds is free.
+4. Pick the threshold whose mistakes cost you least, and check it again on each new model
+   version before you move the pin.
 
 Once you have a number, pin down what your code does at it. A decision is a function of answers,
 so test it like any other function. `answer` makes a real answer from the values you give it,
@@ -454,12 +480,12 @@ fn a_refund_needs_more_than_0_9() {
 ```
 
 `answer` goes through the same checks as a response from Jev, so a test cannot build an answer
-that Jev could never give: `REFUND.answer(1.2)` is an error. A Choice and a Score have one too.
+that Jev could never give: `REFUND.answer(1.2)` is an error. Each question type has one.
 
 ## Concurrency and retries
 
-Ask about a whole queue at once. By default the client keeps 8 requests in flight, gives each
-attempt 10 s, and retries a 408, a 429, a 5xx, a timeout, or a failed connection twice, with
+Ask about a whole queue at once. By default the client keeps at most 8 requests in flight, gives
+each attempt 10 s, and retries a 408, a 429, a 5xx, a timeout, or a failed connection twice, with
 backoff.
 
 To change a setting (`max_concurrent_requests`, `timeout`, `max_retries`), build a
@@ -473,7 +499,7 @@ use tokio::task::JoinSet;
 let client = Client::from_env()?.max_concurrent_requests(2).set_global();
 
 let mut asking = JoinSet::new();
-for ticket in &tickets {
+for ticket in &tickets { // tickets: Vec<Ticket>
     asking.spawn(noul!("Is the ticket urgent?").tag(ticket.id).ask(ticket));
 }
 for answered in asking.join_all().await {
@@ -507,13 +533,42 @@ answer. The tag is not sent to Jev.
 | `SYSTEM2_CACHE` | The path of a cache file. |
 | `SYSTEM2_OFFLINE` | `1` answers only from the cache. |
 
+## OpenRouter
+
+[OpenRouter](https://openrouter.ai/) also serves Jev, with the same API. Point the client at it
+with the two variables from OpenRouter's guide, and the rest of your code stays the same:
+
+```sh
+export TYPESAFE_BASE_URL=https://openrouter.ai/api
+export TYPESAFE_API_KEY=sk-or-...   # your OpenRouter key
+```
+
+Or set both in code, with the key from OpenRouter's own variable:
+
+```rust,ignore
+let key = std::env::var("OPENROUTER_API_KEY").expect("set OPENROUTER_API_KEY");
+let client = Client::new()
+    .base_url("https://openrouter.ai/api")
+    .api_key(key)
+    .set_global();
+```
+
+A few things differ on OpenRouter:
+
+- A pinned model has no patch number: `jev-1.14` on OpenRouter, and `jev-1.14.0` on TypeSafe.
+  `jev-latest` works on both.
+- Long context is always on, so `long_context(true)` changes nothing.
+- The request ID in an error or a receipt is OpenRouter's generation ID, and the span's
+  `gen_ai.provider.name` is `openrouter`.
+
 ## Tracing
 
 Each request is a `tracing` span, so it goes to the logs and dashboards you already have. Its
 fields have the model that answered, the tokens, the latency, and the request ID, and the
 `gen_ai.*` names follow OpenTelemetry's conventions for generative AI. Each attempt is a `DEBUG`
-event in the span, and each retry is a `WARN` event with the error and the wait. The five
-requests above took 73 to 184 ms.
+event in the span, or a `WARN` event with the error and the wait when a retry follows. The span's
+parent is the span that is current when you call `.ask`. The five requests above took 73 to
+184 ms.
 
 The crate installs no subscriber. This output is from
 `tracing_subscriber::fmt().with_span_events(FmtSpan::CLOSE)`, which prints each span when it
@@ -540,7 +595,8 @@ option serializes as its name, so your values need no `Serialize`. `trace_bodies
 client also writes the body of each request in a `TRACE` event. A body holds the state, which is
 often private, so it is off by default.
 
-The span above shows both names. The default model is `jev-latest`, which TypeSafe moves to
+The span above shows both: the request asked for `jev-latest`, and `jev-1.14.0` answered. The
+default model is `jev-latest`, which TypeSafe moves to
 each new version. `.model("jev-1.14.0")` on the client pins one, so the model changes only when
 your code does.
 
@@ -572,8 +628,8 @@ match route(ticket, teams).await {
 ```
 
 `Error::Question` holds a [`QuestionError`][QuestionError], from whichever constructor refused
-the question. Each message says what failed, and the fix when there is one. An `AskError` for a
-response from the API carries its request ID, when the API sent one, for TypeSafe support.
+the question. Each message says what failed, and the fix when there is one. `AskError::Http` and
+`AskError::InvalidResponse` carry the request ID, when the API sent one, for TypeSafe support.
 
 ## Blocking API
 
@@ -602,10 +658,10 @@ TypeSafe's API sets most of these, and the crate checks each one as early as it 
 | --- | --- | --- |
 | Options | 1 to 255 for a Choice, each with a different, nonempty name. | The compiler, or a constructor |
 | Levels | 1 to 10 for a Score, each different. | The compiler, or a constructor |
-| Tuples | 1 to 12 sets in a tuple. Other sets have no limit. | The compiler |
+| Tuples | 1 to 12 items in a tuple, each a question or a set. Arrays and `Vec`s have no limit. | The compiler |
 | Tokens | About 32k for the state and the longest question, and 64k for the request. `long_context(true)` raises each to about 262k. | `AskError::TokenLimit` |
 | Images | PNG or JPEG, at most 16 MiB, each side 280 to 1568 px. At most 32 MiB of images in a request. | `InvalidImage`, or `AskError::ByteLimit` |
-| Bbox | `jev-1.14.0` or a later model. | `AskError::BboxModel` |
+| Bbox | Jev 1.14 or a later model. TypeSafe can change images and Bbox in a new release of Jev. | `AskError::BboxModel` |
 | Precision | The API rounds each probability and each edge to 0.01. | |
 
 ## Crate features
@@ -631,17 +687,21 @@ code.
 
 ## Examples
 
-Each example is a crate of its own in
-[`examples/`](https://github.com/jhartquist/system2/tree/main/examples). Run one with
-`cargo run -p <name>`.
+Each example is a crate of its own in [`examples/`][examples]. Run one with `cargo run -p <name>`,
+or replay its recording with no key, as CI does:
 
-- [`quick_start`](https://github.com/jhartquist/system2/tree/main/examples/quick_start): asks if
-  a function has a bug.
-- [`find_in_image`](https://github.com/jhartquist/system2/tree/main/examples/find_in_image):
-  finds an object in a photo, and writes a crop of it. It needs `--features image`.
-- [`citation_check`](https://github.com/jhartquist/system2/tree/main/examples/citation_check):
-  a port of a [TypeSafe cookbook](https://docs.typesafe.ai/cookbooks). It finds the citations
-  that are not true, and sends the uncertain ones to a person.
+```sh
+SYSTEM2_CACHE=examples/recordings/triage.jsonl SYSTEM2_OFFLINE=1 cargo run -p triage
+```
+
+- [`quick_start`][quick_start]: asks one yes-or-no question about a short function, and reads the
+  probability of yes.
+- [`triage`][triage]: the triage on this page, five tickets with three questions each.
+- [`find_in_image`][find_in_image]: finds an object in a photo, and writes a crop of it. It needs
+  `--features image`.
+- [`citation_check`][citation_check]: a port of a [TypeSafe
+  cookbook](https://docs.typesafe.ai/cookbooks). It checks whether its source supports each
+  citation, and sends the uncertain ones to a person.
 
 ## License
 
@@ -650,8 +710,6 @@ Licensed under either of
 [MIT license](https://github.com/jhartquist/system2/blob/main/LICENSE-MIT) at your option.
 
 Issues are welcome, but pull requests are not accepted for now.
-
-`system2` is not affiliated with or endorsed by TypeSafe.
 
 [Noul]: https://docs.rs/system2/latest/system2/struct.Noul.html
 [NoulAnswer]: https://docs.rs/system2/latest/system2/struct.NoulAnswer.html
@@ -670,7 +728,7 @@ Issues are welcome, but pull requests are not accepted for now.
 [noul!]: https://docs.rs/system2/latest/system2/macro.noul.html
 [questions!]: https://docs.rs/system2/latest/system2/macro.questions.html
 [Questions]: https://docs.rs/system2/latest/system2/struct.Questions.html
-[Answers]: https://docs.rs/system2/latest/system2/trait.Answers.html
+[Answers]: https://docs.rs/system2/latest/system2/derive.Answers.html
 [Client]: https://docs.rs/system2/latest/system2/struct.Client.html
 [Client::from_env]: https://docs.rs/system2/latest/system2/struct.Client.html#method.from_env
 [Client::set_global]: https://docs.rs/system2/latest/system2/struct.Client.html#method.set_global
@@ -679,3 +737,8 @@ Issues are welcome, but pull requests are not accepted for now.
 [AskError]: https://docs.rs/system2/latest/system2/enum.AskError.html
 [QuestionError]: https://docs.rs/system2/latest/system2/enum.QuestionError.html
 [blocking]: https://docs.rs/system2/latest/system2/blocking/index.html
+[examples]: https://github.com/jhartquist/system2/tree/main/examples
+[quick_start]: https://github.com/jhartquist/system2/tree/main/examples/quick_start
+[triage]: https://github.com/jhartquist/system2/tree/main/examples/triage
+[find_in_image]: https://github.com/jhartquist/system2/tree/main/examples/find_in_image
+[citation_check]: https://github.com/jhartquist/system2/tree/main/examples/citation_check

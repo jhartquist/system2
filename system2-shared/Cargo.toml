@@ -6,7 +6,7 @@ rust-version = "1.88"
 description = "The code that system2 and its macros share. It is not a public API."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jhartquist/system2"
-readme = "../README.md"
+readme = "README.md"
 
 [package.metadata.docs.rs]
 all-features = true
