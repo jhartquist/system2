@@ -65,16 +65,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Replay quick_start from its recording
         env:
-          SYSTEM2_CACHE: examples/quick_start/responses.jsonl
+          SYSTEM2_CACHE: examples/recordings/quick_start.jsonl
         run: cargo run -p quick_start
       - name: Replay find_in_image from its recording
         env:
-          SYSTEM2_CACHE: examples/find_in_image/responses.jsonl
+          SYSTEM2_CACHE: examples/recordings/find_in_image.jsonl
         run: |
           cargo run -p find_in_image --features image -- \
             examples/find_in_image/data/desk.jpg "the coffee cup" draw target/cup.jpg
           cargo run -p find_in_image --features image -- \
             examples/find_in_image/data/desk.jpg "a cat" draw target/cat.jpg
+      - name: Replay triage from its recording
+        env:
+          SYSTEM2_CACHE: examples/recordings/triage.jsonl
+        run: cargo run -p triage
+      - name: Replay citation_check from its recording
+        env:
+          SYSTEM2_CACHE: examples/recordings/citation_check.jsonl
+        run: cargo run -p citation_check
 
   deny:
     runs-on: ubuntu-latest
