@@ -1,6 +1,6 @@
 use super::header::{Header, MAX_SIDE, MIN_SIDE, fits, read_header};
 use image::codecs::jpeg::JpegEncoder;
-use image::codecs::png::PngEncoder;
+use image::codecs::png::{self, CompressionType, PngEncoder};
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits};
 use std::fmt;
@@ -68,13 +68,19 @@ pub fn encode(image: &DynamicImage, format: Option<ImageFormat>) -> Result<Vec<u
     } else if image.color().has_alpha() {
         image
             .to_rgba8()
-            .write_with_encoder(PngEncoder::new(&mut bytes))?;
+            .write_with_encoder(png_encoder(&mut bytes))?;
     } else {
         image
             .to_rgb8()
-            .write_with_encoder(PngEncoder::new(&mut bytes))?;
+            .write_with_encoder(png_encoder(&mut bytes))?;
     }
     Ok(bytes)
+}
+
+// the default level, not the fast one of `PngEncoder::new`: a screenshot gets about a third
+// smaller for about 25 ms, and a png is lossless at each level
+fn png_encoder(bytes: &mut Vec<u8>) -> PngEncoder<&mut Vec<u8>> {
+    PngEncoder::new_with_quality(bytes, CompressionType::Default, png::FilterType::Adaptive)
 }
 
 // one factor for both sides keeps the aspect ratio. none when no factor fits both sides
@@ -130,7 +136,7 @@ impl fmt::Display for ConvertError {
 mod tests {
     use super::super::{Header, read_header};
     use super::{ConvertError, Converted, convert, encode, fitted_size};
-    use image::{DynamicImage, ImageError, ImageFormat};
+    use image::{DynamicImage, ImageError, ImageFormat, Rgb, RgbImage};
     use std::io::Cursor;
 
     fn encoded(image: &DynamicImage, format: ImageFormat) -> Vec<u8> {
@@ -219,6 +225,24 @@ mod tests {
             // the bit depth and the color type in the header chunk
             assert_eq!(png[24..26], [8, color_type], "{:?}", image.color());
         }
+    }
+
+    #[test]
+    fn encode_compresses_a_png_with_no_loss() {
+        // bars and lines, as in a chart or a screenshot
+        let chart = RgbImage::from_fn(600, 400, |x, y| {
+            let bar = u8::try_from(x / 100 * 40).unwrap();
+            let line = if y % 50 == 0 { 0 } else { 255 };
+            Rgb([bar, line, 255 - bar])
+        });
+        let image = DynamicImage::ImageRgb8(chart);
+
+        let png = encode(&image, None).unwrap();
+
+        let fast = encoded(&image, ImageFormat::Png);
+        assert!(png.len() < fast.len(), "{} >= {}", png.len(), fast.len());
+        let decoded = image::load_from_memory(&png).unwrap();
+        assert_eq!(decoded.as_bytes(), image.as_bytes());
     }
 
     #[test]
