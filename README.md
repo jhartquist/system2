@@ -10,18 +10,18 @@ Daniel Kahneman's *Thinking, Fast and Slow* popularized two modes of thinking:
 - **System 1** makes quick, intuitive judgments.
 - **System 2** reasons slowly and deliberately.
 
-> the goal is to make System 1 tasks extremely reliable and get System 2 by composing with code
->
-> \- [Diogo Almeida](https://x.com/CompleteSkeptic/status/2099981459541143995), CEO of TypeSafe
-
 TypeSafe calls Jev a [System One](https://docs.typesafe.ai/concepts/system-one) model: it answers
 narrow questions about an input, called the `state`. Unlike an LLM asked for structured output, Jev
 doesn't generate text or produce any chain-of-thought: it answers with calibrated probabilities.
 `system2` brings those judgments into Rust. A question or a state can be as simple as a string, or
 it can be built from your own enums, structs, and images. Either way, an answer returns the values
-you passed in, with their probabilities, so you can compose them into decisions with code.
+you passed in, with their probabilities.
 
-## Why system2
+> the goal is to make System 1 tasks extremely reliable and get System 2 by composing with code
+>
+> \- [Diogo Almeida](https://x.com/CompleteSkeptic/status/2099981459541143995), CEO of TypeSafe
+
+## Highlights
 
 - **Flexible**: strings, JSON, images, your own enums, or any `Serialize` or `Display` type.
 - **Ergonomic**: macros and derives for static questions, options, and levels, with helpful
@@ -454,9 +454,9 @@ Five settings can come from the environment or from code:
 
 The rest, such as `timeout`, `max_retries`, and `long_context`, are set only in code.
 [`Client::from_env`][Client::from_env] reads the variables once, when it makes the client, and a
-method after it wins: `Client::from_env()?.model("jev-1.14.0")` asks `jev-1.14.0` whatever
-`TYPESAFE_DEFAULT_MODEL` says. [`Client::new`][Client::new] reads no environment, so you give
-everything in code. With no key, a client answers only from its cache.
+method called after it overrides a variable: `Client::from_env()?.model("jev-1.14.0")` asks
+`jev-1.14.0` whatever `TYPESAFE_DEFAULT_MODEL` says. [`Client::new`][Client::new] reads no
+environment, so you give everything in code. With no key, a client answers only from its cache.
 
 ## OpenRouter
 
