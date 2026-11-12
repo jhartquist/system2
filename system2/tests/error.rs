@@ -147,3 +147,22 @@ async fn error_takes_each_error_that_a_function_returns() {
     );
     assert_eq!(ask.to_string(), "the state must not be empty");
 }
+
+#[test]
+fn error_debug_shows_the_message_and_its_causes() {
+    let cases = [
+        (
+            AskError::MissingApiKey,
+            "a request must have an API key: set `TYPESAFE_API_KEY`, or call `Client::api_key`",
+        ),
+        (
+            AskError::Transport("connection refused".into()),
+            "the connection to the API failed: check the network and the base URL\n\n\
+             Caused by:\n    connection refused",
+        ),
+    ];
+
+    for (error, debug) in cases {
+        assert_eq!(format!("{:?}", Error::from(error)), debug);
+    }
+}
