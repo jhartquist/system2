@@ -18,9 +18,8 @@ TypeSafe calls Jev a [System One](https://docs.typesafe.ai/concepts/system-one) 
 narrow questions about an input, called the `state`. Unlike an LLM asked for structured output, Jev
 doesn't generate text or produce any chain-of-thought: it answers with calibrated probabilities.
 `system2` brings those judgments into Rust. A question or a state can be as simple as a string, or
-it can be built from your own enums and structs, and even images. Either way, an answer hands back
-the values you passed in, with their probabilities, so you can compose them into decisions
-with code.
+it can be built from your own enums, structs, and images. Either way, an answer returns the values
+you passed in, with their probabilities, so you can compose them into decisions with code.
 
 ## Why system2
 
@@ -80,13 +79,13 @@ async fn main() -> system2::Result<()> {
 }
 ```
 
-Jev answered 0.67 for the refund, under the 0.9 the code wants, and 0.85 for angry, over 0.8, so
-this prints `send to a person`.
+Jev answered 0.67 for the refund, below its 0.9 threshold, and 0.85 for angry, above its 0.8
+threshold, so this prints `send to a person`.
 
 [`.ask`][Ask::ask] takes any question or set of questions, and a state, and returns the answers in
-the shape of the questions. There is no client to set up. The first `.ask` makes a global client
-from `TYPESAFE_API_KEY`, and every later `.ask` shares it. `.ask` consumes what it asks, so clone a
-question to ask it again.
+the shape of the questions. It uses the global client: unless you set your own, the first `.ask`
+makes a default one from the environment, such as `TYPESAFE_API_KEY`. The Client section below
+shows how to customize it. `.ask` consumes what it asks, so clone a question to ask it again.
 
 The prelude has the macros and the traits. The snippets below are fragments, so `ticket` is whatever
 state each one needs. Import each type they use by name, as in `use system2::Noul;`.
@@ -186,7 +185,7 @@ enum Team {
 ```
 
 Options can also be written inline: as names, as names with descriptions, or as tuples with a
-value of your own that the answer hands back:
+value of your own that the answer returns:
 
 ```rust
 use system2::Choice;
@@ -209,7 +208,7 @@ const DAYS: Choice<u32> = choice!(
 ```
 
 For values from data, [`Choice::with_values`][Choice::with_values] takes your values and a closure
-that gives each one its name, or its name and a description. The answer hands back the value Jev
+that gives each one its name, or its name and a description. The answer returns the value Jev
 picked, with no lookup:
 
 ```rust,ignore
@@ -248,7 +247,7 @@ if same.is_likely() {
 }
 ```
 
-`image!` uses `include_bytes!` under the hood and checks the image when the crate builds, so a
+`image!` embeds the file with `include_bytes!` and checks the image when the crate builds, so a
 missing or bad image is a compile error. `Image::new` checks bytes that arrive at run time.
 `is_likely` is true at a probability of 0.5 or more. A [`bbox`][Bbox] asks where something is,
 and `to_pixels` turns its answer into a box in the pixels of the image. Ask a bbox about one image
@@ -389,9 +388,8 @@ Five tickets, one request each:
 | 5 | The invoice page crashes when I try to pay. | ask a person |
 
 The full program is [`examples/triage`][triage], with the recording behind these numbers. Ticket 5
-could be billing or engineering. Jev gave engineering 0.80 and billing 0.20, the code wants 0.90
-before it acts, so a person gets it. Each number in that code is yours: the answers keep their
-probabilities, so every threshold stays in your code where you can see it.
+could be billing or engineering. Jev gave engineering 0.80 and billing 0.20, below the 0.90
+threshold, so it goes to a person.
 
 One answer can also pick the next question:
 
@@ -402,135 +400,63 @@ if let Team::Billing = team {
 }
 ```
 
-## Testing
+## Client
 
-Record the answers once, then replay them with no API key and no network:
+A [`Client`][Client] sends the requests to the API. To change its settings, such as the model or
+the timeout, build one of your own:
 
-```sh
-SYSTEM2_CACHE=triage.jsonl cargo run                     # asks Jev, and records
-SYSTEM2_CACHE=triage.jsonl SYSTEM2_OFFLINE=1 cargo run   # replays, sends nothing
-```
+```rust,no_run
+use std::time::Duration;
 
-In `examples/triage`, change `TEAM_THRESHOLD` from 0.9 to 0.8 and replay: ticket 5 pages the
-engineering lead. Change it back, and it goes to a person. Trying both cost zero requests. Offline,
-a request that changed since the recording (the question, the state, or the model) is an error, not
-a quiet call to the API. A replayed answer counts no tokens and has no request ID. The file holds
-each response and a hash of its request, not the request itself. Treat it like the rest of your test
-data.
+use system2::Client;
+use system2::prelude::*;
 
-The same file makes a test repeatable. Write the test as usual:
+#[tokio::main]
+async fn main() -> system2::Result<()> {
+    let ticket = "I was charged twice. Fix it today.";
 
-```rust,ignore
-#[tokio::test]
-async fn a_double_charge_goes_to_billing() -> system2::Result<()> {
-    let team = choice!("Which team should handle this ticket?", Team)
-        .ask("I was charged twice.")
+    let client = Client::from_env()?
+        .model("jev-1.14.0")
+        .timeout(Duration::from_secs(30))
+        .max_retries(4)
+        .max_concurrent_requests(16);
+
+    let refund = client
+        .ask(noul!("Does the customer ask for a refund?"), ticket)
         .await?;
-    assert!(matches!(team.most_likely(), Team::Billing));
+    println!("refund: {:.2}", refund.probability());
+
+    client.set_global();
+
+    let angry = noul!("Is the customer angry?").ask(ticket).await?;
+    println!("angry: {:.2}", angry.probability());
     Ok(())
 }
 ```
 
-Record it once with your key, commit the file, and run it offline in CI:
+`client.ask(question, state)` uses only that client, and leaves the global client as it is.
+[`set_global`][Client::set_global] makes it the client that every `.ask` uses, so the rest of your
+code does not change. A clone of a client shares its connections, its cache, its request limit,
+and its token count.
 
-```sh
-SYSTEM2_CACHE=tests/jev.jsonl cargo test
-SYSTEM2_CACHE=tests/jev.jsonl SYSTEM2_OFFLINE=1 cargo test
-```
+The example pins the model. TypeSafe moves `jev-latest`, the default, to each new version of Jev,
+and a pinned model such as `jev-1.14.0` changes only when your code does.
 
-On a client of your own, `Client::from_env()?.cache("tests/jev.jsonl")?.offline(true)` does the same
-in code. Two live runs of one request can give different probabilities: in the recordings behind
-this page, the probability that ticket 1 is urgent was 0.82 in one run and 0.83 in the next. The
-cache is what makes runs the same. A request matches only when its body matches byte for byte, so
-use a `BTreeMap`, not a `HashMap`, in a state: a `HashMap` writes its keys in a different order each
-run.
+Five settings can come from the environment or from code:
 
-### Choosing thresholds
+| Setting | Variable | Method | Default |
+| --- | --- | --- | --- |
+| API key | `TYPESAFE_API_KEY` | `.api_key(key)` | none |
+| Base URL | `TYPESAFE_BASE_URL` | `.base_url(url)` | `https://api.typesafe.ai` |
+| Model | `TYPESAFE_DEFAULT_MODEL` | `.model(name)` | `jev-latest` |
+| Cache file | `SYSTEM2_CACHE` | `.cache(path)?` | none |
+| Offline | `SYSTEM2_OFFLINE=1` | `.offline(true)` | off |
 
-The right number is yours to find. TypeSafe trains Jev so that its probabilities are
-[calibrated](https://docs.typesafe.ai/concepts/system-one): across many answers, the stated
-probability should match how often such answers are right. It is no guarantee about any one
-answer, and the numbers on this page are examples, not advice.
-
-1. Pin the model with `.model("jev-1.14.0")`, so the answers do not move while you choose.
-2. Record the answers for tickets you have already labelled.
-3. Replay them at each candidate threshold, and count each kind of mistake. A replay costs no
-   requests, so trying many thresholds is free.
-4. Pick the threshold whose mistakes cost you least, and check it again on each new model
-   version before you move the pin.
-
-Once you have a number, pin down what your code does at it. A decision is a function of answers,
-so test it like any other function. `answer` makes a real answer from the values you give it,
-with no key, no network, and no runtime:
-
-```rust,ignore
-const REFUND: Noul = noul!("Does the customer ask for a refund?");
-
-fn refund_now(refund: &NoulAnswer) -> bool {
-    refund.probability() > 0.9
-}
-
-#[test]
-fn a_refund_needs_more_than_0_9() {
-    assert!(!refund_now(&REFUND.answer(0.90).unwrap()));
-    assert!(refund_now(&REFUND.answer(0.91).unwrap()));
-}
-```
-
-`answer` goes through the same checks as a response from Jev, so a test cannot build an answer that
-Jev could never give: `REFUND.answer(1.2)` is an error. Each question type has an `answer`.
-
-## Concurrency and retries
-
-Ask about a whole queue at once. By default the client keeps at most 8 requests in flight, gives
-each attempt 10 s, and retries a 408, a 429, a 5xx, a timeout, or a failed connection twice, with
-backoff.
-
-To change a setting (`model`, `max_concurrent_requests`, `timeout`, `max_retries`), build a
-[`Client`][Client] of your own. [`set_global`][Client::set_global] makes it the client that every
-`.ask` uses, so the rest of your code does not change. `client.ask(question, state)` uses one client
-without making it global.
-
-```rust,ignore
-use tokio::task::JoinSet;
-
-let client = Client::from_env()?.max_concurrent_requests(2).set_global();
-
-let mut asking = JoinSet::new();
-for ticket in &tickets { // tickets: Vec<Ticket>
-    asking.spawn(noul!("Is the ticket urgent?").tag(ticket.id).ask(ticket));
-}
-for answered in asking.join_all().await {
-    let (urgent, id) = answered?;
-    println!("ticket {id}: urgent {:.2}", urgent.probability());
-}
-
-let usage = client.usage();
-println!("{} tokens in, {} out", usage.input_tokens, usage.output_tokens);
-```
-
-```text
-ticket 2: urgent 0.08
-ticket 4: urgent 0.20
-ticket 3: urgent 0.90
-ticket 5: urgent 0.71
-ticket 1: urgent 0.83
-1507 tokens in, 105 out
-```
-
-The answers arrive in the order they finish, so `.tag` carries each ticket's ID back next to its
-answer. The tag is not sent to Jev. `.ask` serializes the state before it returns, so a spawned
-task does not borrow the ticket.
-
-[`Client::from_env`][Client::from_env] reads these variables:
-
-| Variable | Value |
-| --- | --- |
-| `TYPESAFE_API_KEY` | The API key. |
-| `TYPESAFE_BASE_URL` | The base URL. The default is `https://api.typesafe.ai`. |
-| `TYPESAFE_DEFAULT_MODEL` | The model. The default is `jev-latest`. |
-| `SYSTEM2_CACHE` | The path of a cache file. |
-| `SYSTEM2_OFFLINE` | `1` answers only from the cache. |
+The rest, such as `timeout`, `max_retries`, and `long_context`, are set only in code.
+[`Client::from_env`][Client::from_env] reads the variables once, when it makes the client, and a
+method after it wins: `Client::from_env()?.model("jev-1.14.0")` asks `jev-1.14.0` whatever
+`TYPESAFE_DEFAULT_MODEL` says. [`Client::new`][Client::new] reads no environment, so you give
+everything in code. With no key, a client answers only from its cache.
 
 ## OpenRouter
 
@@ -560,13 +486,125 @@ A few things differ on OpenRouter:
 - The request ID in an error or a receipt is OpenRouter's generation ID, and the span's
   `gen_ai.provider.name` is `openrouter`.
 
+## Testing
+
+Record the answers once, then replay them with no API key and no network:
+
+```sh
+SYSTEM2_CACHE=triage.jsonl cargo run                     # asks Jev, and records
+SYSTEM2_CACHE=triage.jsonl SYSTEM2_OFFLINE=1 cargo run   # replays, sends nothing
+```
+
+In `examples/triage`, change `TEAM_THRESHOLD` from 0.9 to 0.8 and replay: ticket 5 pages the
+engineering lead. Change it back, and it goes to a person. Neither replay sends a request. Offline,
+a request that changed since the recording (the question, the state, or the model) is an error, not
+a quiet call to the API. A replayed answer counts no tokens and has no request ID. The file holds
+each response and a hash of its request, not the request itself. Treat it like the rest of your test
+data.
+
+The same file makes a test repeatable. Write the test as usual:
+
+```rust,ignore
+#[tokio::test]
+async fn a_double_charge_goes_to_billing() -> system2::Result<()> {
+    let team = choice!("Which team should handle this ticket?", Team)
+        .ask("I was charged twice.")
+        .await?;
+    assert!(matches!(team.most_likely(), Team::Billing));
+    Ok(())
+}
+```
+
+Record it once with your key, commit the file, and run it offline in CI:
+
+```sh
+SYSTEM2_CACHE=tests/jev.jsonl cargo test
+SYSTEM2_CACHE=tests/jev.jsonl SYSTEM2_OFFLINE=1 cargo test
+```
+
+On a client, [`.cache`][Client::cache] and [`.offline`][Client::offline] set the same in code.
+Two live runs of one request can give different probabilities: in
+the recordings behind this page, the probability that ticket 1 is urgent was 0.82 in one run and
+0.83 in the next. The cache is what makes runs the same. A request matches only when its body
+matches byte for byte, so use a `BTreeMap`, not a `HashMap`, in a state: a `HashMap` writes its
+keys in a different order each run.
+
+### Choosing thresholds
+
+The thresholds on this page are illustrative. Choose yours from labeled data. TypeSafe trains
+Jev to be [calibrated](https://docs.typesafe.ai/concepts/system-one): across many answers, those
+given 0.8 should be correct about 80% of the time. Calibration describes the aggregate, not any
+single answer.
+
+To pick a threshold, record answers for a set of labeled tickets, and replay them at each
+candidate value. Choose the value that minimizes the cost of your errors, weighing false positives
+against false negatives.
+
+Then lock in the behavior at that threshold with a unit test. A decision is a function of its
+answers, and `answer` constructs a real answer from the values you give it, with no API key, no
+network, and no runtime:
+
+```rust,ignore
+const REFUND: Noul = noul!("Does the customer ask for a refund?");
+
+fn refund_now(refund: &NoulAnswer) -> bool {
+    refund.probability() > 0.9
+}
+
+#[test]
+fn a_refund_needs_more_than_0_9() {
+    assert!(!refund_now(&REFUND.answer(0.90).unwrap()));
+    assert!(refund_now(&REFUND.answer(0.91).unwrap()));
+}
+```
+
+`answer` runs the same checks as a response from Jev, so a test cannot build an answer that Jev
+could never give: `REFUND.answer(1.2)` is an error. Each question type has an `answer`.
+
+## Concurrency and retries
+
+Ask about a whole queue at once. By default the client keeps at most 8 requests in flight, gives
+each attempt 10 s, and retries a 408, a 429, a 5xx, a timeout, or a failed connection twice, with
+backoff.
+
+```rust,ignore
+use tokio::task::JoinSet;
+
+let client = Client::from_env()?.max_concurrent_requests(2).set_global();
+
+let mut asking = JoinSet::new();
+for ticket in &tickets { // tickets: Vec<Ticket>
+    asking.spawn(noul!("Is the ticket urgent?").tag(ticket.id).ask(ticket));
+}
+for answered in asking.join_all().await {
+    let (urgent, id) = answered?;
+    println!("ticket {id}: urgent {:.2}", urgent.probability());
+}
+
+let usage = client.usage();
+println!("{} tokens in, {} out", usage.input_tokens, usage.output_tokens);
+```
+
+```text
+ticket 2: urgent 0.08
+ticket 4: urgent 0.20
+ticket 3: urgent 0.90
+ticket 5: urgent 0.71
+ticket 1: urgent 0.83
+1507 tokens in, 105 out
+```
+
+The five requests took 73 to 184 ms each. The answers arrive in the order they finish, so `.tag`
+carries each ticket's ID back next to its answer. The tag is not sent to Jev. `.ask` serializes
+the state before it returns, so a spawned task does not borrow the ticket.
+
 ## Tracing
 
-Each request is a `tracing` span, so it goes to the logs and dashboards you already have. Its fields
-have the model that answered, the tokens, the latency, and the request ID, and the `gen_ai.*` names
+Each request is a `tracing` span, so it reaches whatever subscriber you install. Its fields have
+the model that answered, the tokens, the latency, and the request ID, and the `gen_ai.*` names
 follow OpenTelemetry's conventions for generative AI. Each attempt is a `DEBUG` event in the span,
 or a `WARN` event with the error and the wait when a retry follows. The span's parent is the span
-that is current when you call `.ask`. The five requests of the queue took 73 to 184 ms.
+that is current when you call `.ask`.
 
 The crate installs no subscriber. This output is from
 `tracing_subscriber::fmt().with_span_events(FmtSpan::CLOSE)`, which prints each span when it
@@ -593,9 +631,8 @@ option serializes as its name, so your values need no `Serialize`. `trace_bodies
 client also writes the body of each request in a `TRACE` event. A body holds the state, which is
 often private, so it is off by default.
 
-In the span, the request asked for `jev-latest`, and `jev-1.14.0` answered. `jev-latest` is the
-default, and TypeSafe moves it to each new version. `.model("jev-1.14.0")` on the client pins
-one, so the model changes only when your code does.
+The span records both the model that the request asked for (`jev-latest`) and the model that
+answered (`jev-1.14.0`).
 
 ## Errors
 
@@ -653,13 +690,18 @@ TypeSafe's API sets most of these, and the crate checks each one as early as it 
 
 | Limit | Value | Checked by |
 | --- | --- | --- |
-| Options | 1 to 255 for a Choice, each with a different, nonempty name. | The compiler, or a constructor |
-| Levels | 1 to 10 for a Score, each different. | The compiler, or a constructor |
-| Tuples | 1 to 12 items in a tuple, each a question or a set. Arrays and `Vec`s have no limit. | The compiler |
-| Tokens | About 32k for the state and the longest question, and 64k for the request. `long_context(true)` raises each to about 262k. | `AskError::TokenLimit` |
-| Images | PNG or JPEG, at most 16 MiB, each side 280 to 1568 px. At most 32 MiB of images in a request. | `InvalidImage`, or `AskError::ByteLimit` |
-| Bbox | Jev 1.14 or a later model. TypeSafe can change images and Bbox in a new release of Jev. | `AskError::BboxModel` |
-| Precision | The API rounds each probability and each edge to 0.01. | |
+| Options | 1 to 255 for a Choice, each with a different, nonempty name | Compiler or constructor |
+| Levels | 1 to 10 for a Score, each different | Compiler or constructor |
+| Tuples | 1 to 12 items, each a question or a set | Compiler |
+| Tokens | About 32k for the state and the longest question together | `AskError::TokenLimit` |
+| Request | About 64k tokens | `AskError::TokenLimit` |
+| Images | PNG or JPEG, at most 16 MiB, each side 280 to 1568 px | `InvalidImage` |
+| Image bytes | At most 32 MiB of images in a request | `AskError::ByteLimit` |
+| Bbox | Jev 1.14 or a later model | `AskError::BboxModel` |
+| Precision | 0.01 for each probability and each edge | |
+
+Arrays and `Vec`s of questions have no limit. `long_context(true)` raises each token limit to
+about 262k. TypeSafe can change images and Bbox in a new release of Jev.
 
 ## Crate features
 
@@ -727,7 +769,10 @@ Issues are welcome, but pull requests are not accepted for now.
 [Questions]: https://docs.rs/system2/latest/system2/struct.Questions.html
 [Answers]: https://docs.rs/system2/latest/system2/derive.Answers.html
 [Client]: https://docs.rs/system2/latest/system2/struct.Client.html
+[Client::cache]: https://docs.rs/system2/latest/system2/struct.Client.html#method.cache
 [Client::from_env]: https://docs.rs/system2/latest/system2/struct.Client.html#method.from_env
+[Client::new]: https://docs.rs/system2/latest/system2/struct.Client.html#method.new
+[Client::offline]: https://docs.rs/system2/latest/system2/struct.Client.html#method.offline
 [Client::set_global]: https://docs.rs/system2/latest/system2/struct.Client.html#method.set_global
 [Receipt]: https://docs.rs/system2/latest/system2/struct.Receipt.html
 [Error]: https://docs.rs/system2/latest/system2/enum.Error.html

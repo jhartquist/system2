@@ -129,7 +129,8 @@ impl Client {
     /// Makes a client from the environment.
     ///
     /// It reads five variables. It removes whitespace from the start and the end of each one. An
-    /// empty variable counts as not set.
+    /// empty variable counts as not set. A builder method called after it overrides a variable, as
+    /// in `Client::from_env()?.model("jev-1.14.0")`.
     ///
     /// - `TYPESAFE_API_KEY`: the key. With no key, only the cache answers.
     /// - `TYPESAFE_BASE_URL`: the base URL.
