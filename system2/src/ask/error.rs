@@ -101,7 +101,8 @@ pub enum AskError {
         status: u16,
         /// The message of the API, the body, or the reason of the status.
         message: String,
-        /// The ID of the request, for TypeSafe support.
+        /// The ID of the request, for TypeSafe support. Through OpenRouter, it is the generation
+        /// ID.
         request_id: Option<String>,
     },
     /// The response does not have the shape of the API, or does not answer the questions.
@@ -109,7 +110,8 @@ pub enum AskError {
     InvalidResponse {
         /// What is wrong with the response.
         message: String,
-        /// The ID of the request, for TypeSafe support.
+        /// The ID of the request, for TypeSafe support. Through OpenRouter, it is the generation
+        /// ID.
         request_id: Option<String>,
     },
     /// The client cannot open the cache file, or add to it.

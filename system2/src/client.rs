@@ -183,6 +183,10 @@ impl Client {
 
     /// Sets the base URL of the API. The default is `https://api.typesafe.ai`.
     ///
+    /// `https://openrouter.ai/api` sends each request through OpenRouter, which serves Jev with
+    /// the same API. Give the client an OpenRouter key with [`api_key`](Client::api_key) or
+    /// `TYPESAFE_API_KEY`.
+    ///
     /// `ask` returns [`AskError::InvalidBaseUrl`] if the URL is not an absolute HTTP or HTTPS URL.
     #[must_use]
     pub fn base_url(self, base_url: impl Into<String>) -> Self {
@@ -236,7 +240,8 @@ impl Client {
 
     /// Raises the token limits of the API. The default is `false`.
     ///
-    /// It sends the header `TypeSafe-Danger-Zone-Long-Context: true`.
+    /// It sends the header `TypeSafe-Danger-Zone-Long-Context: true`. OpenRouter always has the
+    /// long context, so this changes nothing there.
     #[must_use]
     pub fn long_context(self, long_context: bool) -> Self {
         Client {

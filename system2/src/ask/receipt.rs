@@ -34,7 +34,7 @@ pub struct Receipt {
     ///
     /// [`Client::max_concurrent_requests`]: crate::Client::max_concurrent_requests
     pub latency: Duration,
-    /// The ID of the request, for TypeSafe support.
+    /// The ID of the request, for TypeSafe support. Through OpenRouter, it is the generation ID.
     pub request_id: Option<String>,
 }
 
