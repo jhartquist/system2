@@ -1,7 +1,7 @@
 use super::table::Table;
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
 use crate::json::Json;
-use crate::{InvalidJson, QuestionSet, Tagged, json};
+use crate::{InvalidAnswer, InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
@@ -16,6 +16,8 @@ pub struct Choice<O> {
     instructions: Json,
     options: Table<MacroOption<O>, Entry<O>>,
 }
+
+const EACH_OPTION: &str = "must give a probability for each option of the Choice, and no other";
 
 // an option as a macro writes it: the name, the description, and the value
 type MacroOption<O> = (&'static str, Option<Json>, O);
@@ -166,6 +168,47 @@ impl<O> Choice<O> {
 
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
+    }
+
+    pub fn answer(
+        mut self,
+        most_likely: &O,
+        confidence: f64,
+        probabilities: impl IntoIterator<Item = f64>,
+    ) -> Result<ChoiceAnswer<O>, InvalidAnswer>
+    where
+        O: PartialEq,
+    {
+        let options = self.options.entries();
+        let choice = options
+            .iter()
+            .position(|o| o.value == *most_likely)
+            .ok_or_else(|| InvalidAnswer::new("must choose an option of the Choice"))?;
+        let probabilities = probabilities.into_iter().collect();
+        self.validated_answer(choice, confidence, probabilities)
+            .map_err(InvalidAnswer::new)
+    }
+
+    fn validated_answer(
+        mut self,
+        choice: usize,
+        confidence: f64,
+        probabilities: Vec<f64>,
+    ) -> Result<ChoiceAnswer<O>, String> {
+        validate_range("confidence", confidence, 1.0)?;
+        if probabilities.len() != self.options.entries().len() {
+            return Err(EACH_OPTION.to_owned());
+        }
+        for &probability in &probabilities {
+            validate_range("probability", probability, 1.0)?;
+        }
+        let question = self;
+        Ok(ChoiceAnswer {
+            question,
+            choice,
+            confidence,
+            probabilities,
+        })
     }
 
     fn validated(
@@ -399,24 +442,14 @@ impl<O> Sealed for Choice<O> {
             .iter()
             .position(|o| o.name == choice)
             .ok_or_else(|| format!("must choose an option of the Choice, not `{choice}`"))?;
-        validate_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
         let probabilities = options
             .iter()
             .map(|o| probabilities.remove(o.name.as_ref()))
             .collect::<Option<Vec<_>>>()
             .filter(|_| count == options.len())
-            .ok_or("must give a probability for each option of the Choice, and no other")?;
-        for &probability in &probabilities {
-            validate_range("probability", probability, 1.0)?;
-        }
-        let question = self;
-        Ok(ChoiceAnswer {
-            question,
-            choice,
-            confidence,
-            probabilities,
-        })
+            .ok_or(EACH_OPTION)?;
+        self.validated_answer(choice, confidence, probabilities)
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
 use crate::json::Json;
-use crate::{InvalidJson, QuestionSet, Tagged, json};
+use crate::{InvalidAnswer, InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::{RawValue, to_raw_value};
@@ -49,6 +49,20 @@ impl Noul {
 
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
+    }
+
+    pub fn answer(self, probability: f64) -> Result<NoulAnswer, InvalidAnswer> {
+        self.validated_answer(probability)
+            .map_err(InvalidAnswer::new)
+    }
+
+    fn validated_answer(self, probability: f64) -> Result<NoulAnswer, String> {
+        validate_range("probability", probability, 1.0)?;
+        let question = self;
+        Ok(NoulAnswer {
+            question,
+            probability,
+        })
     }
 }
 
@@ -168,12 +182,7 @@ impl Sealed for Noul {
         raw_answer_set: &mut RawAnswerSet,
     ) -> Result<<Self as QuestionSet>::AnswerSet, String> {
         let Answer::Noul { noul: probability } = raw_answer_set.next()?;
-        validate_range("probability", probability, 1.0)?;
-        let question = self;
-        Ok(NoulAnswer {
-            question,
-            probability,
-        })
+        self.validated_answer(probability)
     }
 }
 

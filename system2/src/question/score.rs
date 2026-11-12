@@ -1,7 +1,7 @@
 use super::table::Table;
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
 use crate::json::Json;
-use crate::{InvalidJson, QuestionSet, Tagged, json};
+use crate::{InvalidAnswer, InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
@@ -14,6 +14,8 @@ pub struct Score<L> {
     instructions: Json,
     levels: Table<MacroLevel<L>, Entry<L>>,
 }
+
+const EACH_LEVEL: &str = "must give a probability for each level of the Score, and no other";
 
 // a level as a macro writes it: the text of the level, and the value
 type MacroLevel<L> = (&'static str, L);
@@ -83,6 +85,53 @@ impl<L> Score<L> {
 
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
+    }
+
+    pub fn answer(
+        self,
+        score: f64,
+        confidence: f64,
+        probabilities: impl IntoIterator<Item = f64>,
+    ) -> Result<ScoreAnswer<L>, InvalidAnswer> {
+        let probabilities = probabilities.into_iter().collect();
+        self.validated_answer(score, confidence, probabilities)
+            .map_err(InvalidAnswer::new)
+    }
+
+    fn validated_answer(
+        mut self,
+        score: f64,
+        confidence: f64,
+        probabilities: Vec<f64>,
+    ) -> Result<ScoreAnswer<L>, String> {
+        let levels = self.levels.entries();
+        #[expect(clippy::cast_precision_loss, reason = "a Score has at most 10 levels")]
+        let last_position = (levels.len() - 1) as f64;
+        validate_range("score", score, last_position)?;
+        validate_range("confidence", confidence, 1.0)?;
+        if probabilities.len() != levels.len() {
+            return Err(EACH_LEVEL.to_owned());
+        }
+        for &probability in &probabilities {
+            validate_range("probability", probability, 1.0)?;
+        }
+
+        // of two equal probabilities, the lower level is the more likely
+        let most_likely = (0..probabilities.len())
+            .max_by(|&a, &b| {
+                probabilities[a]
+                    .total_cmp(&probabilities[b])
+                    .then(b.cmp(&a))
+            })
+            .unwrap_or_default();
+        let question = self;
+        Ok(ScoreAnswer {
+            question,
+            score,
+            confidence,
+            probabilities,
+            most_likely,
+        })
     }
 
     fn validated(
@@ -280,36 +329,13 @@ impl<L> Sealed for Score<L> {
             mut probabilities,
         } = raw_answer_set.next()?;
         let levels = self.levels.entries();
-        #[expect(clippy::cast_precision_loss, reason = "a Score has at most 10 levels")]
-        let last_position = (levels.len() - 1) as f64;
-        validate_range("score", score, last_position)?;
-        validate_range("confidence", confidence, 1.0)?;
         let count = probabilities.len();
         let probabilities = (0..levels.len())
             .map(|index| probabilities.remove(&index.to_string()))
             .collect::<Option<Vec<_>>>()
             .filter(|_| count == levels.len())
-            .ok_or("must give a probability for each level of the Score, and no other")?;
-        for &probability in &probabilities {
-            validate_range("probability", probability, 1.0)?;
-        }
-
-        // of two equal probabilities, the lower level is the more likely
-        let most_likely = (0..probabilities.len())
-            .max_by(|&a, &b| {
-                probabilities[a]
-                    .total_cmp(&probabilities[b])
-                    .then(b.cmp(&a))
-            })
-            .unwrap_or_default();
-        let question = self;
-        Ok(ScoreAnswer {
-            question,
-            score,
-            confidence,
-            probabilities,
-            most_likely,
-        })
+            .ok_or(EACH_LEVEL)?;
+        self.validated_answer(score, confidence, probabilities)
     }
 }
 

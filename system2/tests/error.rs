@@ -60,6 +60,10 @@ async fn ask_with_no_state(server: &MockServer) -> system2::Result<NoulAnswer> {
     Ok(client_for(server).ask(Noul::new(INSTRUCTIONS)?, "").await?)
 }
 
+fn answer(probability: f64) -> system2::Result<NoulAnswer> {
+    Ok(Noul::new(INSTRUCTIONS)?.answer(probability)?)
+}
+
 #[test]
 fn question_error_takes_the_error_of_each_constructor() {
     let noul = questions("", OPTIONS, LEVELS, REGION).unwrap_err();
@@ -101,6 +105,7 @@ async fn error_takes_each_error_that_a_function_returns() {
     let score = questions_or_error(INSTRUCTIONS, OPTIONS, &[], REGION).unwrap_err();
     let bbox = questions_or_error(INSTRUCTIONS, OPTIONS, LEVELS, "").unwrap_err();
     let question = questions_of_a_set().unwrap_err();
+    let answer = answer(1.2).unwrap_err();
     let image = image(include_bytes!("images/long.png")).unwrap_err();
     let ask = ask_with_no_state(&server).await.unwrap_err();
     let missing_folder = cache_path("error").with_extension("");
@@ -126,6 +131,7 @@ async fn error_takes_each_error_that_a_function_returns() {
         question,
         Error::Question(QuestionError::Noul(InvalidNoul::Instructions(_)))
     ));
+    assert!(matches!(answer, Error::Answer(_)));
     assert!(matches!(image, Error::Image(InvalidImage::Size { .. })));
     assert!(matches!(
         ask,
@@ -133,5 +139,9 @@ async fn error_takes_each_error_that_a_function_returns() {
     ));
     assert!(matches!(cache, Error::Cache(CacheError::Read { .. })));
     assert_eq!(noul.to_string(), "the instructions must not be empty");
+    assert_eq!(
+        answer.to_string(),
+        "the answer must give a probability from 0 to 1, not 1.2"
+    );
     assert_eq!(ask.to_string(), "the state must not be empty");
 }

@@ -1,6 +1,6 @@
 use crate::ask::wire::{RawAnswerSet, RawQuestionSet, Sealed, validate_range};
 use crate::json::Json;
-use crate::{Image, InvalidJson, QuestionSet, Tagged, json};
+use crate::{Image, InvalidAnswer, InvalidJson, QuestionSet, Tagged, json};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -18,6 +18,44 @@ impl Bbox {
 
     pub const fn tag<T>(self, tag: T) -> Tagged<Self, T> {
         Tagged::new(self, tag)
+    }
+
+    pub fn answer(
+        self,
+        left: f64,
+        top: f64,
+        right: f64,
+        bottom: f64,
+        confidence: f64,
+    ) -> Result<BboxAnswer, InvalidAnswer> {
+        self.validated_answer(left, top, right, bottom, confidence)
+            .map_err(InvalidAnswer::new)
+    }
+
+    fn validated_answer(
+        self,
+        left: f64,
+        top: f64,
+        right: f64,
+        bottom: f64,
+        confidence: f64,
+    ) -> Result<BboxAnswer, String> {
+        validate_range("left edge", left, 1.0)?;
+        validate_range("top edge", top, 1.0)?;
+        validate_range("right edge", right, 1.0)?;
+        validate_range("bottom edge", bottom, 1.0)?;
+        validate_range("confidence", confidence, 1.0)?;
+        validate_order("left", left, "right", right)?;
+        validate_order("top", top, "bottom", bottom)?;
+        let question = self;
+        Ok(BboxAnswer {
+            question,
+            left,
+            top,
+            right,
+            bottom,
+            confidence,
+        })
     }
 }
 
@@ -176,22 +214,7 @@ impl Sealed for Bbox {
                 },
             confidence,
         } = raw_answer_set.next()?;
-        validate_range("left edge", left, 1.0)?;
-        validate_range("top edge", top, 1.0)?;
-        validate_range("right edge", right, 1.0)?;
-        validate_range("bottom edge", bottom, 1.0)?;
-        validate_range("confidence", confidence, 1.0)?;
-        validate_order("left", left, "right", right)?;
-        validate_order("top", top, "bottom", bottom)?;
-        let question = self;
-        Ok(BboxAnswer {
-            question,
-            left,
-            top,
-            right,
-            bottom,
-            confidence,
-        })
+        self.validated_answer(left, top, right, bottom, confidence)
     }
 }
 

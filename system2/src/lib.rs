@@ -21,8 +21,9 @@ pub use error::{Error, Result};
 pub use image::{Image, InvalidImage};
 pub use json::InvalidJson;
 pub use question::{
-    Bbox, BboxAnswer, Choice, ChoiceAnswer, InvalidBbox, InvalidChoice, InvalidNoul, InvalidScore,
-    Label, Levels, Noul, NoulAnswer, Options, PixelBox, QuestionError, Score, ScoreAnswer,
+    Bbox, BboxAnswer, Choice, ChoiceAnswer, InvalidAnswer, InvalidBbox, InvalidChoice, InvalidNoul,
+    InvalidScore, Label, Levels, Noul, NoulAnswer, Options, PixelBox, QuestionError, Score,
+    ScoreAnswer,
 };
 pub use system2_macros::{Answers, Levels, Options, bbox, choice, noul, questions, score};
 
