@@ -87,11 +87,11 @@ this prints `send to a person`.
 
 [`.ask`][Ask::ask] takes any question or set of questions, and a state, and returns the answers in
 the shape of the questions. There is no client to set up. The first `.ask` makes a global client
-from `TYPESAFE_API_KEY`, and every later `.ask` shares it. `.ask` consumes a set, so clone a
+from `TYPESAFE_API_KEY`, and every later `.ask` shares it. `.ask` consumes what it asks, so clone a
 question to ask it again.
 
-The prelude has the macros and the traits. The snippets below continue this example. Import each
-type they use by name, as in `use system2::Noul;`.
+The prelude has the macros and the traits. The snippets below are fragments, so `ticket` is whatever
+state each one needs. Import each type they use by name, as in `use system2::Noul;`.
 
 ## Questions and state
 
@@ -147,9 +147,9 @@ let team = Choice::new("Which team should handle this ticket?", teams)?
 println!("{}", team.most_likely()); // billing
 ```
 
-Or your own types. The enum is the list of options, its doc comments describe them to Jev, and
-the answer is one of your variants. Each option's name is its variant in snake case, such as
-`billing`:
+It also takes your own types. The enum is the list of options, its doc comments describe them to
+Jev, and the answer is one of your variants. Each option's name is its variant in snake case, such
+as `billing`:
 
 ```rust,ignore
 #[derive(Serialize)]
@@ -440,11 +440,11 @@ SYSTEM2_CACHE=tests/jev.jsonl cargo test
 SYSTEM2_CACHE=tests/jev.jsonl SYSTEM2_OFFLINE=1 cargo test
 ```
 
-On a client of your own, `Client::from_env()?.cache("tests/jev.jsonl")?.offline(true)` does the
-same in code. Two live runs of one request can give different probabilities: in the recordings
-behind this page, one ticket's urgency was 0.82 in one run and 0.83 in the next. The cache is
-what makes runs the same. A request matches only when its body matches byte for byte, so use a
-`BTreeMap`, not a `HashMap`, in a state: a `HashMap` writes its keys in a different order each
+On a client of your own, `Client::from_env()?.cache("tests/jev.jsonl")?.offline(true)` does the same
+in code. Two live runs of one request can give different probabilities: in the recordings behind
+this page, the probability that ticket 1 is urgent was 0.82 in one run and 0.83 in the next. The
+cache is what makes runs the same. A request matches only when its body matches byte for byte, so
+use a `BTreeMap`, not a `HashMap`, in a state: a `HashMap` writes its keys in a different order each
 run.
 
 ### Choosing thresholds
@@ -479,8 +479,8 @@ fn a_refund_needs_more_than_0_9() {
 }
 ```
 
-`answer` goes through the same checks as a response from Jev, so a test cannot build an answer
-that Jev could never give: `REFUND.answer(1.2)` is an error. Each question type has one.
+`answer` goes through the same checks as a response from Jev, so a test cannot build an answer that
+Jev could never give: `REFUND.answer(1.2)` is an error. Each question type has an `answer`.
 
 ## Concurrency and retries
 
@@ -488,10 +488,10 @@ Ask about a whole queue at once. By default the client keeps at most 8 requests 
 each attempt 10 s, and retries a 408, a 429, a 5xx, a timeout, or a failed connection twice, with
 backoff.
 
-To change a setting (`max_concurrent_requests`, `timeout`, `max_retries`), build a
+To change a setting (`model`, `max_concurrent_requests`, `timeout`, `max_retries`), build a
 [`Client`][Client] of your own. [`set_global`][Client::set_global] makes it the client that every
-`.ask` uses, so the rest of your code does not change. `client.ask(question, state)` uses one
-client without making it global.
+`.ask` uses, so the rest of your code does not change. `client.ask(question, state)` uses one client
+without making it global.
 
 ```rust,ignore
 use tokio::task::JoinSet;
@@ -521,7 +521,8 @@ ticket 1: urgent 0.83
 ```
 
 The answers arrive in the order they finish, so `.tag` carries each ticket's ID back next to its
-answer. The tag is not sent to Jev.
+answer. The tag is not sent to Jev. `.ask` serializes the state before it returns, so a spawned
+task does not borrow the ticket.
 
 [`Client::from_env`][Client::from_env] reads these variables:
 
@@ -563,12 +564,11 @@ A few things differ on OpenRouter:
 
 ## Tracing
 
-Each request is a `tracing` span, so it goes to the logs and dashboards you already have. Its
-fields have the model that answered, the tokens, the latency, and the request ID, and the
-`gen_ai.*` names follow OpenTelemetry's conventions for generative AI. Each attempt is a `DEBUG`
-event in the span, or a `WARN` event with the error and the wait when a retry follows. The span's
-parent is the span that is current when you call `.ask`. The five requests above took 73 to
-184 ms.
+Each request is a `tracing` span, so it goes to the logs and dashboards you already have. Its fields
+have the model that answered, the tokens, the latency, and the request ID, and the `gen_ai.*` names
+follow OpenTelemetry's conventions for generative AI. Each attempt is a `DEBUG` event in the span,
+or a `WARN` event with the error and the wait when a retry follows. The span's parent is the span
+that is current when you call `.ask`. The five requests of the queue took 73 to 184 ms.
 
 The crate installs no subscriber. This output is from
 `tracing_subscriber::fmt().with_span_events(FmtSpan::CLOSE)`, which prints each span when it
@@ -595,10 +595,9 @@ option serializes as its name, so your values need no `Serialize`. `trace_bodies
 client also writes the body of each request in a `TRACE` event. A body holds the state, which is
 often private, so it is off by default.
 
-The span above shows both: the request asked for `jev-latest`, and `jev-1.14.0` answered. The
-default model is `jev-latest`, which TypeSafe moves to
-each new version. `.model("jev-1.14.0")` on the client pins one, so the model changes only when
-your code does.
+In the span, the request asked for `jev-latest`, and `jev-1.14.0` answered. `jev-latest` is the
+default, and TypeSafe moves it to each new version. `.model("jev-1.14.0")` on the client pins
+one, so the model changes only when your code does.
 
 ## Errors
 
@@ -682,7 +681,7 @@ code.
   [`Questions`][Questions] for a struct that derives [`Answers`][Answers].
 - [`Client`][Client] holds the key, the model, the cache, and the other settings of a request.
 - [`Image`][Image] is an image for a state, a question, or an option.
-- [`Receipt`][Receipt] has the model, the tokens, and the time of one request.
+- [`Receipt`][Receipt] has the model, the tokens, and the latency of one request.
 - [`Error`][Error] covers every error, and [`AskError`][AskError] tells why a request failed.
 
 ## Examples
