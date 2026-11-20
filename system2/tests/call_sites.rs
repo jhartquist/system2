@@ -8,7 +8,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use support::{AnswerByType, client_for, mount};
 use system2::prelude::*;
-use system2::{Choice, Client, Noul, NoulAnswer, QuestionError, Score, Tagged, Usage};
+use system2::{Client, QuestionError, Tagged, Usage};
 #[cfg(feature = "image")]
 use system2::{Image, PixelBox};
 use tokio::task::JoinSet;

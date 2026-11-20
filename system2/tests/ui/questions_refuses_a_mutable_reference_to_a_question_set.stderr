@@ -1,7 +1,7 @@
 error[E0277]: a field of `questions!` must own its question set, not borrow it
- --> tests/ui/questions_refuses_a_mutable_reference_to_a_question_set.rs:6:33
+ --> tests/ui/questions_refuses_a_mutable_reference_to_a_question_set.rs:5:33
   |
-6 |     let _ = questions! { buggy: &mut buggy };
+5 |     let _ = questions! { buggy: &mut buggy };
   |                                 ^ a reference to a question set
   |
   = help: the trait `system2::ask::field::OwnedQuestionSet` is not implemented for `&mut system2::Noul`

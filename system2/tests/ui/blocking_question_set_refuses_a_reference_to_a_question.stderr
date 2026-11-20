@@ -1,7 +1,7 @@
 error[E0277]: `&system2::Noul` is not a question set
- --> tests/ui/blocking_question_set_refuses_a_reference_to_a_question.rs:6:30
+ --> tests/ui/blocking_question_set_refuses_a_reference_to_a_question.rs:5:30
   |
-6 |     let _ = questions.iter().ask("Buy now!");
+5 |     let _ = questions.iter().ask("Buy now!");
   |                              ^^^ not a question set
   |
   = help: the trait `QuestionSet` is not implemented for `&system2::Noul`

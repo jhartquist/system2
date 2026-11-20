@@ -36,7 +36,6 @@ use serde::{Deserialize, Serialize, Serializer};
 ///
 /// ```
 /// use system2::prelude::*;
-/// # use system2::Bbox;
 ///
 /// const DIALOG: Bbox = bbox!("The error dialog.");
 ///

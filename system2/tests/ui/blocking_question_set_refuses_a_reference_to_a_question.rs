@@ -1,4 +1,3 @@
-use system2::Noul;
 use system2::blocking::prelude::*;
 
 fn main() {

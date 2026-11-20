@@ -7,7 +7,6 @@ use support::{
     Counted, STATE, answer_set_response, api_requests, client_for, counted_drops, mock_api,
     only_request, question_texts, request_body, request_text, response,
 };
-use system2::Score;
 use system2::prelude::*;
 
 #[derive(Debug)]

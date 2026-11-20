@@ -7,7 +7,7 @@ mod support;
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 use support::{bbox_answer, client_for, encoded, mock_api, png, response, sent_pixels};
 use system2::prelude::*;
-use system2::{AskError, Bbox, BboxAnswer, Image, InvalidImage, PixelBox};
+use system2::{AskError, Image, InvalidImage, PixelBox};
 
 const SMALL: Image = image!("images/small.webp");
 const SMALL_BYTES: &[u8] = include_bytes!("images/small.webp");

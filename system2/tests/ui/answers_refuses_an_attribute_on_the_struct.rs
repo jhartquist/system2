@@ -1,4 +1,4 @@
-use system2::{Answers, Noul, NoulAnswer, noul};
+use system2::prelude::*;
 
 const BUGGY: Noul = noul!("Is there a bug in this code?");
 

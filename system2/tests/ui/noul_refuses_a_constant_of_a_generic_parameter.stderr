@@ -1,7 +1,7 @@
 error: constant expression depends on a generic parameter
- --> tests/ui/noul_refuses_a_constant_of_a_generic_parameter.rs:9:5
+ --> tests/ui/noul_refuses_a_constant_of_a_generic_parameter.rs:8:5
   |
-9 |     noul!(R::TEXT)
+8 |     noul!(R::TEXT)
   |     ^^^^^^^^^^^^^^
   |
   = note: this may fail depending on what value the parameter takes

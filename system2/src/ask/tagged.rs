@@ -10,7 +10,7 @@ use crate::QuestionSet;
 ///
 /// ```no_run
 /// use system2::prelude::*;
-/// use system2::{Noul, Tagged};
+/// use system2::Tagged;
 ///
 /// const CHECKS: [Tagged<Noul, &str>; 2] = [
 ///     noul!("Is the ticket urgent?").tag("urgent"),

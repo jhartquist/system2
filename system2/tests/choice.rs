@@ -9,8 +9,8 @@ use support::{
     Counted, STATE, answer_set_response, client_for, counted_drops, mock_api, only_request,
     question_texts, request_text, response,
 };
+use system2::AskError;
 use system2::prelude::*;
-use system2::{AskError, Choice, ChoiceAnswer};
 use wiremock::ResponseTemplate;
 
 const REQUEST_ID: &str = "req_01a13d1fbca4728f8f7c1cdd312bd3a5";

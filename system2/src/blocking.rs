@@ -17,8 +17,10 @@
 //! ```no_run
 //! use system2::blocking::prelude::*;
 //!
+//! const URGENT: Noul = noul!("Is the ticket urgent?");
+//!
 //! fn main() -> system2::Result<()> {
-//!     let answer = noul!("Is the ticket urgent?").ask("The site is down.")?;
+//!     let answer = URGENT.ask("The site is down.")?;
 //!     println!("{:.2}", answer.probability());
 //!     Ok(())
 //! }
@@ -39,7 +41,7 @@ pub mod prelude {
     pub use super::{Ask, AskIterator};
     #[doc(no_inline)]
     pub use crate::{
-        Answers, Levels, Options, QuestionSet, Questions, bbox, choice, image, noul, questions,
-        score,
+        Answers, Bbox, BboxAnswer, Choice, ChoiceAnswer, Levels, Noul, NoulAnswer, Options,
+        QuestionSet, Questions, Score, ScoreAnswer, bbox, choice, image, noul, questions, score,
     };
 }

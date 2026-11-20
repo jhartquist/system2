@@ -7,7 +7,7 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use system2::prelude::*;
-use system2::{Bbox, Image, PixelBox};
+use system2::{Image, PixelBox};
 
 /// The lowest probability that the photo shows the object.
 const PRESENCE_THRESHOLD: f64 = 0.7;

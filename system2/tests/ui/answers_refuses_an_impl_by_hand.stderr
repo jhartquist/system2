@@ -10,7 +10,7 @@ help: the trait `system2::__private::SealedAnswers` is not implemented for `Revi
 3 | struct Review {
   | ^^^^^^^^^^^^^
   = note: add `#[derive(Answers)]` to a struct with named fields, or use `questions! { … }` for other question sets
-note: required by a bound in `Answers`
+note: required by a bound in `system2::Answers`
  --> src/ask/questions.rs
   |
   | pub trait Answers: SealedAnswers {}

@@ -1,4 +1,4 @@
-use system2::{Answers, NoulAnswer};
+use system2::prelude::*;
 
 #[derive(Answers)]
 struct Review(NoulAnswer);

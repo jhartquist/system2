@@ -1,7 +1,7 @@
 error[E0277]: a field of `questions!` must be a question set, not an iterator of them
- --> tests/ui/questions_refuses_an_iterator_of_results.rs:6:34
+ --> tests/ui/questions_refuses_an_iterator_of_results.rs:5:34
   |
-6 |     let _ = questions! { checks: rules.iter().map(Noul::new) };
+5 |     let _ = questions! { checks: rules.iter().map(Noul::new) };
   |                                  ^^^^^ an iterator of question sets
   |
   = help: the trait `system2::ask::field::QuestionSetNotIterator` is not implemented for `Map<std::slice::Iter<'_, &str>, fn(&&str) -> Result<system2::Noul, InvalidNoul> {system2::Noul::new::<&&str>}>`

@@ -5,7 +5,6 @@ mod support;
 use serde_json::json;
 use support::{STATE, answer_set_response, bbox_answer, client_for, mock_api, noul_answer};
 use system2::prelude::*;
-use system2::{Bbox, Choice, ChoiceAnswer, Noul, NoulAnswer, Score, ScoreAnswer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Options)]
 enum Team {

@@ -1,5 +1,4 @@
 use system2::prelude::*;
-use system2::Noul;
 
 fn main() {
     let rules = ["No unwrap.", "No panics."];

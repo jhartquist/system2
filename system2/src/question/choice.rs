@@ -71,8 +71,7 @@ use system2_shared::choice::{self, MAX_OPTIONS};
 /// description:
 ///
 /// ```
-/// use system2::Options;
-/// # use system2::Choice;
+/// use system2::prelude::*;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Options)]
 /// enum Team {
@@ -92,7 +91,6 @@ use system2_shared::choice::{self, MAX_OPTIONS};
 ///
 /// ```no_run
 /// use system2::prelude::*;
-/// use system2::Choice;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Options)]
 /// enum Team {

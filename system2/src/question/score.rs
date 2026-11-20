@@ -55,8 +55,7 @@ use system2_shared::score::{self, MAX_LEVELS};
 /// An enum that derives [`Levels`] gives its variants as the levels:
 ///
 /// ```
-/// use system2::Levels;
-/// # use system2::Score;
+/// use system2::prelude::*;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Levels)]
 /// enum Urgency {
@@ -75,7 +74,6 @@ use system2_shared::score::{self, MAX_LEVELS};
 ///
 /// ```no_run
 /// use system2::prelude::*;
-/// use system2::Score;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Levels)]
 /// enum Urgency {

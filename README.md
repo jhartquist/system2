@@ -87,8 +87,9 @@ the shape of the questions. It uses the global client: unless you set your own, 
 makes a default one from the environment, such as `TYPESAFE_API_KEY`. The Client section below
 shows how to customize it. `.ask` consumes what it asks, so clone a question to ask it again.
 
-The prelude has the macros and the traits. The snippets below are fragments, so `ticket` is whatever
-state each one needs. Import each type they use by name, as in `use system2::Noul;`.
+The prelude has `Noul`, `Choice`, `Score`, `Bbox`, their answer types, the macros, and the traits.
+Clients, errors, and image types need explicit imports. The snippets below are fragments,
+so `ticket` is whatever state each one needs.
 
 ## Questions and state
 
@@ -100,7 +101,7 @@ carries a struct of your own, and the state is JSON. Add serde with
 ```rust,ignore
 use serde::Serialize;
 use serde_json::json;
-use system2::Noul;
+use system2::prelude::*;
 
 #[derive(Serialize)]
 struct Policy {
@@ -122,7 +123,6 @@ A noul can also say what a yes and a no mean. These are its criteria, and you ca
 both:
 
 ```rust
-use system2::Noul;
 use system2::prelude::*;
 
 const REFUND: Noul = noul!("Does the customer ask for a refund?", {
@@ -188,7 +188,6 @@ Options can also be written inline: as names, as names with descriptions, or as 
 value of your own that the answer returns:
 
 ```rust
-use system2::Choice;
 use system2::prelude::*;
 
 const LANGUAGE: Choice<&str> = choice!("In which language is the ticket?", ["en", "es"]);
@@ -641,7 +640,7 @@ that returns `system2::Result`. Here one `?` takes an `InvalidChoice` and the ne
 
 ```rust
 use system2::prelude::*;
-use system2::{AskError, Choice, Error};
+use system2::{AskError, Error};
 
 async fn route(ticket: &str, teams: Vec<String>) -> system2::Result<String> {
     let question = Choice::new("Which team should handle this ticket?", teams)?;

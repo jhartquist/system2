@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::env;
 use system2::prelude::*;
-use system2::{AskError, Choice, Client, Image, PixelBox, Score};
+use system2::{AskError, Client, Image, PixelBox};
 
 const RECORDING: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/live.jsonl");
 

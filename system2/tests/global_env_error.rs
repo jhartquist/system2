@@ -5,7 +5,7 @@ mod support;
 use std::{env, fs};
 use support::{INSTRUCTIONS, STATE, cache_path, noul};
 use system2::prelude::*;
-use system2::{AskError, CacheError, Client, EnvError, NoulAnswer};
+use system2::{AskError, CacheError, Client, EnvError};
 
 #[expect(unsafe_code, reason = "the test sets the environment")]
 fn set_var(name: &str, value: &str) {

@@ -99,7 +99,6 @@ use std::collections::HashMap;
 ///
 /// ```no_run
 /// use system2::prelude::*;
-/// use system2::Noul;
 ///
 /// const URGENT: Noul = noul!("Is the ticket urgent?");
 /// const REFUND: Noul = noul!("Does the customer ask for a refund?", {

@@ -9,7 +9,7 @@ use support::{
     mock_api_then, noul, noul_answer, noul_response, request_count,
 };
 use system2::prelude::*;
-use system2::{AskError, Client, Noul, Usage};
+use system2::{AskError, Client, Usage};
 use tokio::task::JoinSet;
 use tokio::time::{sleep, timeout};
 use wiremock::ResponseTemplate;

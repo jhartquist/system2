@@ -1,4 +1,3 @@
-use system2::Noul;
 use system2::prelude::*;
 
 const BUGGY: Noul = noul!("Is there a bug in this code?");

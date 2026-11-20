@@ -26,15 +26,18 @@ pub use question::{
 };
 pub use system2_macros::{Answers, Levels, Options, bbox, choice, noul, questions, score};
 
-/// The traits and the macros that each program uses.
+/// The question types, answer types, traits, and macros for common use.
 ///
-/// `use system2::prelude::*` imports [`QuestionSet`], [`Ask`], and [`AskIterator`] for `.ask`,
-/// the question macros, [`Questions`], and the derives with their traits.
+/// `use system2::prelude::*` imports [`Noul`], [`Choice`], [`Score`], [`Bbox`], and their answer types.
+/// It imports [`QuestionSet`], [`Ask`], and [`AskIterator`] for `.ask`.
+/// It also imports [`Questions`], the question macros, and the derives with their traits.
+/// Clients, errors, and image types need explicit imports.
 pub mod prelude {
     #[doc(no_inline)]
     pub use crate::{
-        Answers, Ask, AskIterator, Levels, Options, QuestionSet, Questions, bbox, choice, image,
-        noul, questions, score,
+        Answers, Ask, AskIterator, Bbox, BboxAnswer, Choice, ChoiceAnswer, Levels, Noul,
+        NoulAnswer, Options, QuestionSet, Questions, Score, ScoreAnswer, bbox, choice, image, noul,
+        questions, score,
     };
 }
 

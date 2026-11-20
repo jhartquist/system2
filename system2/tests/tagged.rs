@@ -7,8 +7,8 @@ use support::{
     INSTRUCTIONS, STATE, answer_set_response, client_for, mock_api, noul, noul_answer,
     only_request, request_text,
 };
+use system2::Tagged;
 use system2::prelude::*;
-use system2::{Choice, Noul, Score, Tagged};
 
 // no traits at all, so the tag can only come back moved
 struct Ticket {

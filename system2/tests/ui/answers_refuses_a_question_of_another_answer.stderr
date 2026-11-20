@@ -4,7 +4,7 @@ error[E0271]: type mismatch resolving `<Choice<&str> as QuestionSet>::AnswerSet 
 5 |     #[system2(question = choice!("Which language is the code in?", ["rust", "go"]))]
   |                          ^^^^^^ expected `NoulAnswer`, found `ChoiceAnswer<&str>`
   |
-  = note: expected struct `NoulAnswer`
+  = note: expected struct `system2::NoulAnswer`
              found struct `ChoiceAnswer<&str>`
 note: required by a bound in `system2::__private::question_set`
  --> src/ask/questions.rs
@@ -18,7 +18,7 @@ error[E0271]: type mismatch resolving `<Choice<&str> as QuestionSet>::AnswerSet 
 3 | #[derive(Answers)]
   |          ^^^^^^^ expected `NoulAnswer`, found `ChoiceAnswer<&str>`
   |
-  = note: expected struct `NoulAnswer`
+  = note: expected struct `system2::NoulAnswer`
              found struct `ChoiceAnswer<&str>`
 note: required by a bound in `system2::__private::question_set`
  --> src/ask/questions.rs

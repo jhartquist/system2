@@ -8,7 +8,7 @@ use support::{
     question_texts, request_body, response,
 };
 use system2::prelude::*;
-use system2::{AskError, Bbox, Image, PixelBox};
+use system2::{AskError, Image, PixelBox};
 use wiremock::ResponseTemplate;
 
 const MUG: Bbox = bbox!("The mug.");

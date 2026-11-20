@@ -38,7 +38,7 @@ use syn::{DeriveInput, parse_macro_input};
 /// # Examples
 ///
 /// ```
-/// use system2::{Noul, noul};
+/// use system2::prelude::*;
 ///
 /// const URGENT: Noul = noul!("Is the ticket urgent?");
 /// const REFUND: Noul = noul!("Does the customer ask for a refund?", {
@@ -80,7 +80,7 @@ pub fn noul(input: TokenStream) -> TokenStream {
 ///
 /// ```
 /// use std::cmp::Ordering;
-/// use system2::{Choice, Options, choice};
+/// use system2::prelude::*;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Options)]
 /// enum Team {
@@ -130,7 +130,7 @@ pub fn choice(input: TokenStream) -> TokenStream {
 /// # Examples
 ///
 /// ```
-/// use system2::{Levels, Score, score};
+/// use system2::prelude::*;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Levels)]
 /// enum Urgency {
@@ -164,7 +164,7 @@ pub fn score(input: TokenStream) -> TokenStream {
 /// # Examples
 ///
 /// ```
-/// use system2::{Bbox, bbox};
+/// use system2::prelude::*;
 ///
 /// const DIALOG: Bbox = bbox!("The error dialog.");
 ///
@@ -238,7 +238,7 @@ pub fn include_image(input: TokenStream) -> TokenStream {
 /// # Examples
 ///
 /// ```
-/// use system2::{Choice, Options, choice};
+/// use system2::prelude::*;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Options)]
 /// enum Team {
@@ -276,7 +276,7 @@ pub fn derive_options(input: TokenStream) -> TokenStream {
 /// # Examples
 ///
 /// ```
-/// use system2::{Levels, Score, score};
+/// use system2::prelude::*;
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Levels)]
 /// enum Severity {
@@ -315,7 +315,6 @@ pub fn derive_levels(input: TokenStream) -> TokenStream {
 ///
 /// ```no_run
 /// use system2::prelude::*;
-/// use system2::{ChoiceAnswer, NoulAnswer};
 ///
 /// #[derive(Debug, Clone, Copy, PartialEq, Options)]
 /// enum Team {

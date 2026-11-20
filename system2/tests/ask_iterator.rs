@@ -6,7 +6,6 @@ use support::{
     STATE, answer_set_response, client_for, mock_api, noul_answer, only_request, request_body,
 };
 use system2::prelude::*;
-use system2::{Noul, NoulAnswer};
 
 #[tokio::test]
 async fn ask_sends_the_questions_of_an_iterator_in_one_request() {

@@ -1,7 +1,7 @@
 error[E0277]: `T` is not a question set
- --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:7:26
+ --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:6:26
   |
-7 |     let _ = questions! { question_set };
+6 |     let _ = questions! { question_set };
   |                          ^^^^^^^^^^^^ not a question set
   |
   = note: a question set is a question, a `questions!` set, or a tuple, array, `Vec`, or `Option` of question sets
@@ -15,13 +15,13 @@ note: required by a bound in `system2::ask::field::DataField::into_field`
   |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
 help: consider restricting type parameter `T` with trait `QuestionSet`
   |
-6 | fn generic<T: system2::QuestionSet>(question_set: T) {
+5 | fn generic<T: system2::QuestionSet>(question_set: T) {
   |             ++++++++++++++++++++++
 
 error[E0277]: `{integer}` is not a question set
-  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:13:13
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:12:13
    |
-13 |         id: 7,
+12 |         id: 7,
    |             ^ not a question set
    |
    = help: the trait `QuestionSet` is not implemented for `{integer}`
@@ -46,9 +46,9 @@ note: required by a bound in `system2::ask::field::DataField::into_field`
    |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
 
 error[E0277]: `{integer}` is not a question set
-  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:14:16
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:13:16
    |
-14 |         count: Some(7),
+13 |         count: Some(7),
    |                ^^^^ not a question set
    |
    = help: the trait `QuestionSet` is not implemented for `{integer}`
@@ -74,9 +74,9 @@ note: required by a bound in `system2::ask::field::DataField::into_field`
    |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
 
 error[E0277]: `&&&system2::Noul` is not a question set
-  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:15:15
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:14:15
    |
-15 |         deep: &&&BUGGY,
+14 |         deep: &&&BUGGY,
    |               ^ not a question set
    |
    = help: the trait `QuestionSet` is not implemented for `&&&system2::Noul`
@@ -96,9 +96,9 @@ note: required by a bound in `system2::ask::field::DataField::into_field`
    |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
 
 error[E0277]: `&system2::Noul` is not a question set
-  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:16:15
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:15:15
    |
-16 |         list: vec![&BUGGY],
+15 |         list: vec![&BUGGY],
    |               ^^^ not a question set
    |
    = help: the trait `QuestionSet` is not implemented for `&system2::Noul`
@@ -119,9 +119,9 @@ note: required by a bound in `system2::ask::field::DataField::into_field`
    |                          ^^^^^^^^^^^ required by this bound in `DataField::into_field`
 
 error[E0277]: `std::slice::Iter<'_, system2::Noul>` is not a question set
-  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:17:19
+  --> tests/ui/questions_refuses_a_field_that_is_not_a_question_set.rs:16:19
    |
-17 |         iterator: nouls.iter(),
+16 |         iterator: nouls.iter(),
    |                   ^^^^^ not a question set
    |
    = help: the trait `QuestionSet` is not implemented for `std::slice::Iter<'_, system2::Noul>`

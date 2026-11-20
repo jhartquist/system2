@@ -8,7 +8,7 @@ use support::{
     mock_api, no_request_sent, noul, noul_answer, only_request, request_count, request_text,
 };
 use system2::prelude::*;
-use system2::{Choice, ChoiceAnswer, Client, Noul, NoulAnswer, QuestionError, Score, ScoreAnswer};
+use system2::{Client, QuestionError};
 
 /// The answers of a review of a function.
 #[derive(Debug, Answers)]

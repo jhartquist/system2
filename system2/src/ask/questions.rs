@@ -13,7 +13,6 @@ use std::{any, fmt};
 ///
 /// ```no_run
 /// use system2::prelude::*;
-/// use system2::NoulAnswer;
 ///
 /// #[derive(Debug, Answers)]
 /// struct Triage {
